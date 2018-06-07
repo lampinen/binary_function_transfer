@@ -7,11 +7,11 @@ import tensorflow as tf
 import datasets
 PI = np.pi
 ### Parameters
-num_input_per = 8
+num_input_per = 4
 num_hidden = num_input_per*2
-num_runs = 10 
-learning_rate = 0.01
-num_epochs = 50000
+num_runs = 50 
+learning_rate = 0.1
+num_epochs = 75000
 num_layers = 4
 filename_prefix = "paper_nonlinear_transfer_results/"
 input_type = "one_hot" # one_hot, orthogonal, gaussian
@@ -86,7 +86,7 @@ for run_i in xrange(num_runs):
             
             sess.run(tf.global_variables_initializer())
                 
-            with open("results/t2%s_run%i.csv", "w") as fout:
+            with open("results/t2%s_run%i.csv" % (t2, run_i), "w") as fout:
                 fout.write("epoch, loss1, loss2\n")
                 loss1, loss2 = evaluate()
                 print("%i, %f, %f\n" % (0, loss1, loss2))

@@ -1,0 +1,47 @@
+---
+title: "Binary function transfer analyses"
+output: html_notebook
+---
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+
+```{r}
+t2s = c("X0", "XOR", "XOR_of_XORs", "NXOR", "AND")
+num_runs = 40
+
+d = data.frame()
+for (run in 0:(num_runs-1)) {
+  for (t2 in t2s) {
+    this_d = read.csv(sprintf("results/t2%s_run%i.csv", t2, run), header=T)
+    this_d$t2 = t2
+    this_d$run = run
+    d = bind_rows(d, this_d)
+  }
+  
+}
+```
+
+```{r}
+summarized_d = d %>% 
+  group_by(t2, epoch) %>%
+  summarize(sd_loss1 = sd(loss1),
+            loss1 = mean(loss1),
+            sd_loss2 = sd(loss2),
+            loss2 = mean(loss2))
+```
+
+```{r}
+theme_set(theme_bw())
+```
+
+```{r}
+ggplot(summarized_d, aes(x=epoch, y=loss1, color=t2)) + 
+  geom_line() +
+  geom_line(aes(group=interaction(run,t2)), data=d, alpha=0.1)
+```
+
