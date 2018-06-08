@@ -13,11 +13,12 @@ library(ggplot2)
 ```{r}
 t2s = c("X0", "XOR", "XOR_of_XORs", "NXOR", "AND")
 num_runs = 40
+directory = "nhidden_32_results/"
 
 d = data.frame()
 for (run in 0:(num_runs-1)) {
   for (t2 in t2s) {
-    this_d = read.csv(sprintf("results/t2%s_run%i.csv", t2, run), header=T)
+    this_d = read.csv(sprintf("%st2%s_run%i.csv", directory, t2, run), header=T)
     this_d$t2 = t2
     this_d$run = run
     d = bind_rows(d, this_d)
@@ -30,8 +31,10 @@ for (run in 0:(num_runs-1)) {
 summarized_d = d %>% 
   group_by(t2, epoch) %>%
   summarize(sd_loss1 = sd(loss1),
+            median_loss1 = median(loss1),
             loss1 = mean(loss1),
             sd_loss2 = sd(loss2),
+            median_loss2 = median(loss2),
             loss2 = mean(loss2))
 ```
 
@@ -41,7 +44,20 @@ theme_set(theme_bw())
 
 ```{r}
 ggplot(summarized_d, aes(x=epoch, y=loss1, color=t2)) + 
-  geom_line() +
-  geom_line(aes(group=interaction(run,t2)), data=d, alpha=0.1)
+  geom_line(aes(group=interaction(run,t2)), data=d, alpha=0.1) +
+  geom_line(size=1.2) 
 ```
 
+```{r}
+ggsave("results_32.png")
+```
+
+```{r}
+ggplot(summarized_d, aes(x=epoch, y=median_loss1, color=t2)) + 
+  geom_line(aes(y=loss1, group=interaction(run,t2)), data=d, alpha=0.1)+
+  geom_line(size=1.2) 
+```
+
+```{r}
+ggsave("median_results_32.png")
+```
