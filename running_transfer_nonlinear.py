@@ -7,13 +7,13 @@ import tensorflow as tf
 import datasets
 PI = np.pi
 ### Parameters
-num_input_per = 4
+num_input_per = 5
 num_hidden = 32
 num_runs = 10 
 learning_rate = 0.0005
 num_epochs = 20000
 num_layers = 4
-output_dir = "results/"
+output_dir = "results_5/"
 save_every = 20
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 train_sequentially = True # If true, train task 2 and then task 1
@@ -29,9 +29,9 @@ else:
 
 
 for run_i in xrange(num_runs):
-    for input_shared in [True, False]:
-        for t1 in ["XOR_of_XORs", "XOR", "AND"]:
-            for t2 in [ "X0", "XOR", "XOR_of_XORs", "OR", "AND", "None"]:
+    for input_shared in [False, True]:
+        for t1 in ["parity", "XOR_of_XORs", "XOR", "AND"]:
+            for t2 in [ "X0", "XOR", "XOR_of_XORs", "parity", "OR", "AND", "None"]:
                 np.random.seed(run_i)
                 tf.set_random_seed(run_i)
                 filename_prefix = "t1%s_t2%s_sharedinput%s_run%i" %(t1, t2, str(input_shared), run_i)
@@ -48,6 +48,8 @@ for run_i in xrange(num_runs):
                     x1_data, y1_data = datasets.AND_dataset(num_input_per)
                 elif t1 == "OR":
                     x1_data, y1_data = datasets.OR_dataset(num_input_per)
+                elif t1 == "parity":
+                    x1_data, y1_data = datasets.parity_dataset(num_input_per)
 
                 if t2 == "X0":
                     x2_data, y2_data = datasets.X0_dataset(num_input_per)
@@ -61,6 +63,8 @@ for run_i in xrange(num_runs):
                     x2_data, y2_data = datasets.AND_dataset(num_input_per)
                 elif t2 == "OR":
                     x2_data, y2_data = datasets.OR_dataset(num_input_per)
+                elif t2 == "parity":
+                    x2_data, y2_data = datasets.parity_dataset(num_input_per)
 
                 if t2 == "None":
                     if input_shared:

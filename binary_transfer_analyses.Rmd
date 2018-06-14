@@ -12,10 +12,10 @@ library(ggplot2)
 
 ```{r}
 input_shareds = c("False", "True")
-t1s = c("XOR_of_XORs", "XOR", "AND")
-t2s = c("X0", "XOR", "XOR_of_XORs", "OR", "AND", "None")
-num_runs = 10
-directory = "results/"
+t1s = c("parity", "XOR_of_XORs", "XOR", "AND")
+t2s = c("X0", "XOR", "XOR_of_XORs", "parity", "OR", "AND", "None")
+num_runs = 1
+directory = "results_5/"
 
 d = data.frame()
 for (run in 0:(num_runs-1)) {
@@ -52,34 +52,6 @@ summarized_d =d %>%
 ```
 
 ```{r}
-theme_set(theme_bw())
-```
-
-```{r}
-ggplot(summarized_d %>% filter(t1 == "XOR_of_XORs"), aes(x=epoch-20000, y=loss1, color=t2)) + 
-#  geom_line(aes(group=interaction(run,t2)), data=d, alpha=0.1) +
-  geom_line(size=1.2) +
-  xlim(0, 10000) +
-  facet_wrap( ~ input_shared)
-```
-
-```{r}
-ggsave("results.png")
-```
-
-```{r}
-ggplot(summarized_d %>% filter(t1 == "XOR_of_XORs"), aes(x=epoch-20000, y=median_loss1, color=t2)) + 
-#  geom_line(aes(y=loss1, group=interaction(run,t2)), data=d, alpha=0.1)+
-  geom_line(size=1.2) +
-  xlim(0, 10000) +
-  facet_wrap( ~ input_shared)
-```
-
-```{r}
-ggsave("median_results.png")
-```
-
-```{r}
 more_summarized_d = d %>%
   filter(loss1 < 0.05) %>%
   group_by(t1, t2, input_shared, run) %>%
@@ -90,10 +62,34 @@ more_summarized_d = d %>%
 ```
 
 ```{r}
+theme_set(theme_bw())
+```
+
+```{r}
+for (this_t1 in t1s) {
+  ggplot(summarized_d %>% filter(t1 == this_t1), aes(x=epoch-20000, y=loss1, color=t2)) + 
+  #  geom_line(aes(group=interaction(run,t2)), data=d, alpha=0.1) +
+    geom_line(size=1.2) +
+    xlim(0, 4000) +
+    facet_wrap( ~ input_shared)
+  ggsave(sprintf("results_%s.png", this_t1))
+  
+  ggplot(summarized_d %>% filter(t1 == this_t1), aes(x=epoch-20000, y=median_loss1, color=t2)) + 
+  #  geom_line(aes(y=loss1, group=interaction(run,t2)), data=d, alpha=0.1)+
+    geom_line(size=1.2) +
+    xlim(0, 4000) +
+    facet_wrap( ~ input_shared)
+  ggsave(sprintf("median_results_%s.png", this_t1))
+  
+} 
+```
+
+```{r}
+
 ggplot(more_summarized_d, aes(x=t1, y=median_epoch_001, color=t2)) +
   geom_point(size=1.5) + 
   facet_wrap(~ input_shared) +
   labs(x = "Task 1", y= "Epoch when loss < 0.05 (median)")
-  
+ggsave("median_results_summary.png")
 ```
 
