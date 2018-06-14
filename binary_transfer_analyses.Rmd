@@ -11,31 +11,44 @@ library(ggplot2)
 
 
 ```{r}
-t2s = c("X0", "XOR", "XOR_of_XORs", "NXOR", "AND")
-num_runs = 40
-directory = "nhidden_32_results/"
+input_shareds = c("True", "False")
+t1s = c("XOR_of_XORs", "XOR", "AND")
+t2s = c("X0", "XOR", "XOR_of_XORs", "OR", "AND", "None")
+num_runs = 1
+directory = "results/"
 
 d = data.frame()
 for (run in 0:(num_runs-1)) {
-  for (t2 in t2s) {
-    this_d = read.csv(sprintf("%st2%s_run%i.csv", directory, t2, run), header=T)
-    this_d$t2 = t2
-    this_d$run = run
-    d = bind_rows(d, this_d)
+  for (input_shared in input_shareds) {
+    for (t1 in t1s) {
+      for (t2 in t2s) {
+        this_d = read.csv(sprintf("%st1%s_t2%s_sharedinput%s_run%i.csv", directory, t1, t2, input_shared, run), header=T)
+        this_d$t2 = t2
+        this_d$run = run
+        this_d$t1 = t1
+        this_d$input_shared = input_shared
+        d = bind_rows(d, this_d)
+      }
+    } 
   }
-  
 }
 ```
 
 ```{r}
-summarized_d = d %>% 
-  group_by(t2, epoch) %>%
+summarized_d =d %>% 
+  complete(t1, t2, input_shared, epoch) %>%
+  group_by(t1, t2, input_shared) %>%
+  mutate(loss1 = ifelse(is.na(loss1), min(loss1, na.rm=T), loss1),
+         loss2 = ifelse(is.na(loss2), min(loss2, na.rm=T), loss2)) %>%
+  ungroup() %>%
+  group_by(t1, t2, input_shared, epoch) %>%
   summarize(sd_loss1 = sd(loss1),
             median_loss1 = median(loss1),
             loss1 = mean(loss1),
             sd_loss2 = sd(loss2),
             median_loss2 = median(loss2),
-            loss2 = mean(loss2))
+            loss2 = mean(loss2)) %>%
+  ungroup()
 ```
 
 ```{r}
@@ -43,21 +56,44 @@ theme_set(theme_bw())
 ```
 
 ```{r}
-ggplot(summarized_d, aes(x=epoch, y=loss1, color=t2)) + 
-  geom_line(aes(group=interaction(run,t2)), data=d, alpha=0.1) +
-  geom_line(size=1.2) 
+ggplot(summarized_d %>% filter(t1 == "XOR_of_XORs"), aes(x=epoch-20000, y=loss1, color=t2)) + 
+#  geom_line(aes(group=interaction(run,t2)), data=d, alpha=0.1) +
+  geom_line(size=1.2) +
+  xlim(0, 5000) +
+  facet_wrap( ~ input_shared)
 ```
 
 ```{r}
-ggsave("results_32.png")
+ggsave("results_sequential.png")
 ```
 
 ```{r}
-ggplot(summarized_d, aes(x=epoch, y=median_loss1, color=t2)) + 
-  geom_line(aes(y=loss1, group=interaction(run,t2)), data=d, alpha=0.1)+
-  geom_line(size=1.2) 
+ggplot(summarized_d %>% filter(t1 == "XOR_of_XORs"), aes(x=epoch-20000, y=median_loss1, color=t2)) + 
+#  geom_line(aes(y=loss1, group=interaction(run,t2)), data=d, alpha=0.1)+
+  xlim(0, 5000) +
+  geom_line(size=1.2) +
+  facet_wrap( ~ input_shared)
 ```
 
 ```{r}
-ggsave("median_results_32.png")
+ggsave("median_results_sequential.png")
 ```
+
+```{r}
+more_summarized_d = d %>%
+  filter(loss1 < 0.05) %>%
+  group_by(t1, t2, input_shared, run) %>%
+  summarize(epoch_001 = head(epoch, 1)) %>%
+  ungroup() %>%
+  group_by(t1, t2, input_shared) %>%
+  summarize(median_epoch_001 = median(epoch_001))
+```
+
+```{r}
+ggplot(more_summarized_d, aes(x=t1, y=median_epoch_001, color=t2)) +
+  geom_point(size=1.5) + 
+  facet_wrap(~ input_shared) +
+  labs(x = "Task 1", y= "Epoch when loss < 0.05 (median)")
+  
+```
+
