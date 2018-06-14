@@ -11,10 +11,10 @@ library(ggplot2)
 
 
 ```{r}
-input_shareds = c("True", "False")
+input_shareds = c("False", "True")
 t1s = c("XOR_of_XORs", "XOR", "AND")
 t2s = c("X0", "XOR", "XOR_of_XORs", "OR", "AND", "None")
-num_runs = 1
+num_runs = 10
 directory = "results/"
 
 d = data.frame()
@@ -38,8 +38,8 @@ for (run in 0:(num_runs-1)) {
 summarized_d =d %>% 
   complete(t1, t2, input_shared, epoch) %>%
   group_by(t1, t2, input_shared) %>%
-  mutate(loss1 = ifelse(is.na(loss1), min(loss1, na.rm=T), loss1),
-         loss2 = ifelse(is.na(loss2), min(loss2, na.rm=T), loss2)) %>%
+  mutate(loss1 = ifelse(is.na(loss1) & epoch > 20000, min(loss1, na.rm=T), loss1),
+         loss2 = ifelse(is.na(loss2) & epoch > 20000, min(loss2, na.rm=T), loss2)) %>%
   ungroup() %>%
   group_by(t1, t2, input_shared, epoch) %>%
   summarize(sd_loss1 = sd(loss1),
@@ -59,24 +59,24 @@ theme_set(theme_bw())
 ggplot(summarized_d %>% filter(t1 == "XOR_of_XORs"), aes(x=epoch-20000, y=loss1, color=t2)) + 
 #  geom_line(aes(group=interaction(run,t2)), data=d, alpha=0.1) +
   geom_line(size=1.2) +
-  xlim(0, 5000) +
+  xlim(0, 10000) +
   facet_wrap( ~ input_shared)
 ```
 
 ```{r}
-ggsave("results_sequential.png")
+ggsave("results.png")
 ```
 
 ```{r}
 ggplot(summarized_d %>% filter(t1 == "XOR_of_XORs"), aes(x=epoch-20000, y=median_loss1, color=t2)) + 
 #  geom_line(aes(y=loss1, group=interaction(run,t2)), data=d, alpha=0.1)+
-  xlim(0, 5000) +
   geom_line(size=1.2) +
+  xlim(0, 10000) +
   facet_wrap( ~ input_shared)
 ```
 
 ```{r}
-ggsave("median_results_sequential.png")
+ggsave("median_results.png")
 ```
 
 ```{r}

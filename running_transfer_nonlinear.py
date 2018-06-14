@@ -10,17 +10,18 @@ PI = np.pi
 num_input_per = 4
 num_hidden = 32
 num_runs = 10 
-learning_rate = 0.001
+learning_rate = 0.0005
 num_epochs = 20000
 num_layers = 4
 output_dir = "results/"
-save_every = 50
+save_every = 20
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 train_sequentially = True # If true, train task 2 and then task 1
-early_stopping_thresh = 0.001
+batch_size = 4
+early_stopping_thresh = 0.005
 
 ###
-var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1.0, mode='FAN_AVG')
+var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1., mode='FAN_AVG')
 if tf_pm:
     nonlinearity = tf.nn.tanh
 else:
@@ -28,9 +29,9 @@ else:
 
 
 for run_i in xrange(num_runs):
-    for input_shared in [False, True]:
+    for input_shared in [True, False]:
         for t1 in ["XOR_of_XORs", "XOR", "AND"]:
-            for t2 in ["X0", "None", "XOR", "XOR_of_XORs", "OR", "AND"]:
+            for t2 in [ "X0", "XOR", "XOR_of_XORs", "OR", "AND", "None"]:
                 np.random.seed(run_i)
                 tf.set_random_seed(run_i)
                 filename_prefix = "t1%s_t2%s_sharedinput%s_run%i" %(t1, t2, str(input_shared), run_i)
@@ -65,8 +66,8 @@ for run_i in xrange(num_runs):
                     if input_shared:
                         x_data = x1_data
                     else:
-                        x_data = np.concatenate([x1_data, np.zeros_like(x2_data)], axis=1)
-                    y_data = np.concatenate([y1_data, np.zeros_like(y2_data)], axis=1)
+                        x_data = np.concatenate([x1_data, np.zeros_like(x1_data)], axis=1)
+                    y_data = np.concatenate([y1_data, np.zeros_like(y1_data)], axis=1)
                 else:
                     if input_shared:
                         x_data = np.concatenate([x1_data, x2_data], axis=0)
@@ -83,7 +84,6 @@ for run_i in xrange(num_runs):
                 output_size = 1
     
                 num_datapoints = len(x_data)
-                batch_size = len(x_data)
                 batch_subset = len(x1_data)
                 
                 if input_shared:
@@ -107,8 +107,12 @@ for run_i in xrange(num_runs):
                 b = tf.get_variable('Bo', shape=[2*output_size,], initializer=tf.zeros_initializer)
                 output = nonlinearity(tf.matmul(hidden, W) + b)
                 
-                first_domain_loss = tf.nn.l2_loss(output[:batch_subset, :output_size] - target_ph[:batch_subset, :output_size])
-                second_domain_loss = tf.nn.l2_loss(output[batch_subset:, output_size:] - target_ph[batch_subset:, output_size:])
+
+                domain_one_mask = np.concatenate([np.ones(batch_subset, dtype=np.bool), np.zeros(batch_subset, dtype=np.bool)], axis=0)
+                d1_mask_ph = tf.placeholder(tf.bool, shape=[None,])
+                first_domain_loss = tf.nn.l2_loss(tf.boolean_mask(output[:, :output_size] - target_ph[:, :output_size], d1_mask_ph))
+                second_domain_loss = tf.nn.l2_loss(tf.boolean_mask(output[:, output_size:] - target_ph[:, output_size:], tf.logical_not(d1_mask_ph)))
+
                 if t2 == "None":
                     loss = first_domain_loss
                 else:
@@ -120,23 +124,27 @@ for run_i in xrange(num_runs):
             
                 with tf.Session() as sess:
                     def train_epoch():
+                        this_order = np.random.permutation(num_datapoints)
                         for batch_i in xrange(num_datapoints//batch_size):
-                            sess.run(train, feed_dict={input_ph: x_data[batch_i:batch_i+batch_size, :], target_ph: y_data[batch_i:batch_i+batch_size, :]})
+                            sess.run(train, feed_dict={input_ph: x_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], target_ph: y_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], d1_mask_ph: domain_one_mask[this_order[batch_i*batch_size:(batch_i+1)*batch_size]]})
 
                     def train_epoch_1():
+                        this_order = np.random.permutation(num_datapoints)
                         for batch_i in xrange(num_datapoints//batch_size):
-                            sess.run(fd_train, feed_dict={input_ph: x_data[batch_i:batch_i+batch_size, :], target_ph: y_data[batch_i:batch_i+batch_size, :]})
+                            sess.run(fd_train, feed_dict={input_ph: x_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], target_ph: y_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], d1_mask_ph: domain_one_mask[this_order[batch_i*batch_size:(batch_i+1)*batch_size]]})
 
                     def train_epoch_2():
+                        this_order = np.random.permutation(num_datapoints)
                         for batch_i in xrange(num_datapoints//batch_size):
-                            sess.run(sd_train, feed_dict={input_ph: x_data[batch_i:batch_i+batch_size, :], target_ph: y_data[batch_i:batch_i+batch_size, :]})
+                            sess.run(sd_train, feed_dict={input_ph: x_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], target_ph: y_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], d1_mask_ph: domain_one_mask[this_order[batch_i*batch_size:(batch_i+1)*batch_size]]})
+
 
                     def evaluate():
                         curr_loss1 = 0.
                         curr_loss2 = 0.
                         for batch_i in xrange(num_datapoints//batch_size):
-                            curr_loss1 += sess.run(first_domain_loss, feed_dict={input_ph: x_data[batch_i:batch_i+batch_size, :], target_ph: y_data[batch_i:batch_i+batch_size, :]})
-                            curr_loss2 += sess.run(second_domain_loss, feed_dict={input_ph: x_data[batch_i:batch_i+batch_size, :], target_ph: y_data[batch_i:batch_i+batch_size, :]})
+                            curr_loss1 += sess.run(first_domain_loss, feed_dict={input_ph: x_data[batch_i*batch_size:(batch_i+1)*batch_size, :], target_ph: y_data[batch_i*batch_size:(batch_i+1)*batch_size, :], d1_mask_ph: domain_one_mask[batch_i*batch_size:(batch_i+1)*batch_size]})
+                            curr_loss2 += sess.run(second_domain_loss, feed_dict={input_ph: x_data[batch_i*batch_size:(batch_i+1)*batch_size, :], target_ph: y_data[batch_i*batch_size:(batch_i+1)*batch_size, :], d1_mask_ph: domain_one_mask[batch_i*batch_size:(batch_i+1)*batch_size]})
                         return curr_loss1/batch_subset, curr_loss2/batch_subset
                     
                     sess.run(tf.global_variables_initializer())
