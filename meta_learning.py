@@ -18,7 +18,7 @@ num_runs = 20
 learning_rate = 0.000033
 meta_learning_rate = 0.000033
 
-max_base_epochs = 1000 
+max_base_epochs = 2000 
 max_meta_epochs = 500 
 max_new_epochs = 500 
 #num_layers = 3
@@ -353,8 +353,12 @@ class meta_model(object):
 
     def save_embeddings(self, filename):
         """Saves all task embeddings"""
+        def _simplify(t):
+            split_t = t.split(';')
+            return ';'.join([split_t[0], split_t[2]])
         with open(filename, "w") as fout:
-            fout.write("dimension, " + ", ".join(self.base_tasks + self.new_tasks) + "\n")
+            simplified_tasks = [_simplify(t) for t in self.base_tasks + self.new_tasks]
+            fout.write("dimension, " + ", ".join(simplified_tasks) + "\n")
             format_string = ", ".join(["%f" for _ in self.base_tasks + self.new_tasks]) + "\n"
             task_embeddings = self.sess.run(self.function_embeddings) 
             for i in range(num_hidden_hyper):
