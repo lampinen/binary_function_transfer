@@ -73,7 +73,9 @@ def OR_dataset(num_inputs):
     y_data = [[1.*(x[0] or x[1])] for x in x_data]
     return np.array(x_data), np.array(y_data)
 
-def parity_dataset(num_inputs):
+def parity_dataset(num_inputs, num_to_keep=None):
+    if num_to_keep is None:
+        num_to_keep = num_inputs
     x_data = all_binary_possibilities(num_inputs)
-    y_data = [[np.mod(np.sum(x), 2)] for x in x_data]
+    y_data = [[np.mod(np.sum(x[:num_to_keep]), 2)] for x in x_data]
     return np.array(x_data), np.array(y_data)
