@@ -32,7 +32,7 @@ batch_size = 32
 meta_batch_size = 12 # how much of each dataset you see each meta train step
 early_stopping_thresh = 0.005
 meta_early_stopping_thresh = 0.01
-base_tasks = ["X0", "NOTX0", "X0NOTX1", "XOR",  "OR", "AND"]
+base_tasks = ["X0", "NOTX0", "X0NOTX1", "XOR", "threeparity", "OR", "AND"]
 base_task_repeats = 6 # how many times each base task is seen
 new_tasks = ["AND", "X0", "X0NOTX1", "XOR", "NXOR", "XOR_of_XORs"]
 ###
@@ -64,6 +64,8 @@ def _get_dataset(task, num_input):
         x_data, y_data = datasets.OR_dataset(num_input)
     elif task == "parity":
         x_data, y_data = datasets.parity_dataset(num_input)
+    elif task == "threeparity":
+        x_data, y_data = datasets.parity_dataset(num_input, num_to_keep=3)
 
     if tf_pm:
         x_data = 2*x_data - 1
