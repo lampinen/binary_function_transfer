@@ -18,8 +18,6 @@ num_runs = 20
 learning_rate = 0.000033
 meta_learning_rate = 0.000033
 
-
-
 max_base_epochs = 1000 
 max_meta_epochs = 500 
 max_new_epochs = 500 
@@ -71,19 +69,48 @@ def _get_dataset(task, num_input):
         x_data = 2*x_data - 1
         y_data = 2*y_data - 1
 
-    x_data = x_data[:, np.random.permutation(num_input)] # shuffle columns so not always same inputs matter
-    return {"x": x_data, "y": y_data}
+    perm = np.random.permutation(num_input)
+    x0 = np.where(perm == 0)[0][0] # index of X0 in permuted data
+    x1 = np.where(perm == 1)[0][0]
+
+    x_data = x_data[:, perm] # shuffle columns so not always same inputs matter
+    return {"x": x_data, "y": y_data, "relevant": [x0, x1]}
 
 class meta_model(object):
     """A meta-learning model for binary functions."""
     def __init__(self, num_input, base_tasks, base_task_repeats, new_tasks):
         self.num_input = num_input
         self.num_output = num_output
-        self.base_tasks = [task + ";" + str(j) for task in base_tasks for j in range(base_task_repeats)] 
-        self.new_tasks = [task + ";new" for task in new_tasks] 
+
+        # base datasets
+        self.base_tasks = []
+        nbdpp = 2**num_input
+        nbdpt = len(base_tasks) * base_task_repeats * nbdpp
+        self.base_x_data = np.zeros([nbdpt, num_input]) 
+        self.base_y_data = np.zeros([nbdpt, num_output]) 
+        self.base_task_indices = np.zeros([nbdpt]) 
+
+        for task_i, task_name in enumerate(base_tasks * base_task_repeats):
+            dataset = _get_dataset(task_name, num_input)
+            self.base_x_data[task_i*nbdpp:(task_i+1)*nbdpp, :] = dataset["x"]
+            self.base_y_data[task_i*nbdpp:(task_i+1)*nbdpp, :] = dataset["y"]
+            self.base_task_indices[task_i*nbdpp:(task_i+1)*nbdpp] = task_i
+            self.base_tasks.append(task_name + ";" + str(dataset["relevant"][0]) + str(dataset["relevant"][1]) + ";old" + str(task_i)) 
+
+        # new datasets
+        self.new_tasks = []
+        self.new_datasets = {}
+        for task_name in new_tasks:
+            dataset = _get_dataset(task_name, num_input)
+            task_full_name = task_name + ";" + str(dataset["relevant"][0]) + str(dataset["relevant"][1]) + ";new"
+            self.new_datasets[task_full_name] = dataset
+            self.new_tasks.append(task_full_name) 
+
         self.num_tasks = num_tasks = len(self.base_tasks) + len(self.new_tasks)
         self.task_to_index = dict(zip(self.base_tasks + self.new_tasks, range(num_tasks)))
 
+
+        # network
         self.base_input_ph = tf.placeholder(tf.float32, shape=[None, num_input])
         self.base_target_ph = tf.placeholder(tf.float32, shape=[None, num_output])
         self.task_index_ph = tf.placeholder(tf.int64, shape=[None])
@@ -154,28 +181,6 @@ class meta_model(object):
         self.sess = tf.Session()
         self.sess.run(tf.global_variables_initializer())
         
-        # base datasets
-        nbdpp = 2**num_input
-        nbdpt = len(self.base_tasks) * nbdpp
-        self.base_x_data = np.zeros([nbdpt, num_input]) 
-        self.base_y_data = np.zeros([nbdpt, num_output]) 
-        self.base_task_indices = np.zeros([nbdpt]) 
-
-        for task in self.base_tasks:
-            task_name, _ = task.split(";")
-            dataset = _get_dataset(task_name, num_input)
-            task_i = self.task_to_index[task] 
-            self.base_x_data[task_i*nbdpp:(task_i+1)*nbdpp, :] = dataset["x"]
-            self.base_y_data[task_i*nbdpp:(task_i+1)*nbdpp, :] = dataset["y"]
-            self.base_task_indices[task_i*nbdpp:(task_i+1)*nbdpp] = task_i
-
-        # new datasets
-        self.new_datasets = {}
-        for task in self.new_tasks:
-            task_name, _ = task.split(";")
-            dataset = _get_dataset(task_name, num_input)
-            task_i = self.task_to_index[task] 
-            self.new_datasets[task] = dataset
 
     def base_eval(self):
         """Evaluates loss on the base tasks."""
@@ -202,8 +207,9 @@ class meta_model(object):
 
     def new_eval(self, new_task):
         """Evaluates loss on a new task."""
-        dataset = self.new_datasets[new_task+";new"]
-        index = self.task_to_index[new_task+";new"]
+        new_task_full_name = [t for t in self.new_tasks if new_task in t][0] 
+        dataset = self.new_datasets[new_task_full_name]
+        index = self.task_to_index[new_task_full_name]
         tiled_index = np.tile(index, len(dataset["x"])) 
         this_feed_dict = {
             self.base_input_ph: dataset["x"],
@@ -287,8 +293,11 @@ class meta_model(object):
     def train_new_tasks(self, filename_prefix):
         for new_task in new_tasks:
             print("Now training new task: " + new_task)
-            index = self.task_to_index[new_task+";new"]
-            dataset = self.new_datasets[new_task+";new"]
+            new_task_full_name = [t for t in self.new_tasks if new_task in t][0] 
+            print(new_task_full_name)
+            print(self.task_to_index)
+            index = self.task_to_index[new_task_full_name]
+            dataset = self.new_datasets[new_task_full_name]
 
             # meta-network guess at optimal embedding
             this_feed_dict = {
