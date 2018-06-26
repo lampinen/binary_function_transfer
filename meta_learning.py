@@ -131,7 +131,7 @@ class meta_model(object):
         
         base_emb_optimizer = tf.train.AdamOptimizer(learning_rate) # optimizes only embedding
         self.base_emb_train = base_emb_optimizer.minimize(self.base_loss,
-                                                      var_list=[self.function_embeddings])
+                                                          var_list=[v for v in tf.global_variables() if "function_embedding" in v.name])
 
         # function "guessing" network 
         self.guess_input_ph = tf.placeholder(tf.float32, shape=[None, num_input + num_output])
@@ -144,7 +144,7 @@ class meta_model(object):
         guess_hidden_2b = tf.reduce_max(guess_hidden_2, axis=0, keep_dims=True)
 
         self.guess_output = slim.fully_connected(guess_hidden_2b, num_hidden_hyper,
-                                              activation_fn=None)
+                                                 activation_fn=None)
 
         self.guess_loss =  tf.nn.l2_loss(self.guess_output - self.guess_target_ph) 
         guess_optimizer = tf.train.AdamOptimizer(meta_learning_rate)
@@ -318,14 +318,15 @@ class meta_model(object):
                 print(curr_output)
 
                 # now tune only embedding
-                tiled_index = np.tile(index, batch_size) 
                 for epoch in range(1, max_new_epochs):
                     order = np.random.permutation(len(dataset["x"]))
-                    for batch_i in range(len(order)//batch_size):
+                    for batch_i in range(len(order)//batch_size + 1):
                         indices = order[batch_i*batch_size:(batch_i+1) * batch_size]
+                        this_y = dataset["y"][indices, :]
+                        tiled_index = np.tile(index, len(this_y)) 
                         this_feed_dict = {
                             self.base_input_ph: dataset["x"][indices, :],
-                            self.base_target_ph: dataset["y"][indices, :],
+                            self.base_target_ph: this_y,
                             self.task_index_ph: tiled_index
                         }
                         self.sess.run(self.base_emb_train, feed_dict=this_feed_dict)
