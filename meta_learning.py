@@ -15,13 +15,14 @@ num_output = 1
 num_hidden = 16
 num_hidden_hyper = 64
 num_runs = 20 
-learning_rate = 0.00001
-meta_learning_rate = 0.00001
+learning_rate = 3e-5
+meta_learning_rate = 1e-5 
 
-max_base_epochs = 3000 
+max_base_epochs = 4000 
 max_meta_epochs = 2000 
 max_new_epochs = 500 
-#num_layers = 3
+num_task_hidden_layers = 3
+num_meta_hidden_layers = 3
 output_dir = "meta_results/"
 save_every = 10 #20
 save_every_meta = 10
@@ -29,13 +30,13 @@ tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 hyper_convolutional = True # whether hyper network creates weights convolutionally
 conv_in_channels = 4
 
-batch_size = 32
-meta_batch_size = 12 # how much of each dataset you see each meta train step
+batch_size = 16
+meta_batch_size = 12 # how much of each dataset the function embedding guesser sees 
 early_stopping_thresh = 0.005
 meta_early_stopping_thresh = 0.001
-base_tasks = ["X0", "NOTX0", "XOR", "threeparity", "NXOR", "OR", "AND"]
+base_tasks = ["X0", "NOTX0", "XOR", "NOR", "OR", "AND"]
 base_task_repeats = 5 # how many times each base task is seen
-new_tasks = ["AND", "OR", "X0NOTX1", "XOR", "NXOR", "XOR_of_XORs"]
+new_tasks = ["X0", "AND", "OR", "NOR", "NAND", "X0NOTX1", "XOR", "XOR_of_XORs"]
 ###
 var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1., mode='FAN_AVG')
 
@@ -73,6 +74,10 @@ def _get_dataset(task, num_input):
         x_data, y_data = datasets.AND_dataset(num_input)
     elif task == "OR":
         x_data, y_data = datasets.OR_dataset(num_input)
+    elif task == "NAND":
+        x_data, y_data = datasets.NAND_dataset(num_input)
+    elif task == "NOR":
+        x_data, y_data = datasets.NOR_dataset(num_input)
     elif task == "parity":
         x_data, y_data = datasets.parity_dataset(num_input)
     elif task == "threeparity":
@@ -101,14 +106,13 @@ class meta_model(object):
         nbdpt = len(base_tasks) * base_task_repeats * nbdpp
         self.base_x_data = np.zeros([nbdpt, num_input]) 
         self.base_y_data = np.zeros([nbdpt, num_output]) 
-        self.base_task_indices = np.zeros([nbdpt]) 
+        self.base_datasets = {}
 
         for task_i, task_name in enumerate(base_tasks * base_task_repeats):
             dataset = _get_dataset(task_name, num_input)
-            self.base_x_data[task_i*nbdpp:(task_i+1)*nbdpp, :] = dataset["x"]
-            self.base_y_data[task_i*nbdpp:(task_i+1)*nbdpp, :] = dataset["y"]
-            self.base_task_indices[task_i*nbdpp:(task_i+1)*nbdpp] = task_i
-            self.base_tasks.append(task_name + ";" + str(dataset["relevant"][0]) + str(dataset["relevant"][1]) + ";old" + str(task_i)) 
+            task_full_name = task_name + ";" + str(dataset["relevant"][0]) + str(dataset["relevant"][1]) + ";old" + str(task_i)
+            self.base_datasets[task_full_name] = dataset 
+            self.base_tasks.append(task_full_name) 
 
         # new datasets
         self.new_tasks = []
@@ -122,66 +126,79 @@ class meta_model(object):
         self.num_tasks = num_tasks = len(self.base_tasks) + len(self.new_tasks)
         self.task_to_index = dict(zip(self.base_tasks + self.new_tasks, range(num_tasks)))
 
-
         # network
         self.base_input_ph = tf.placeholder(tf.float32, shape=[None, num_input])
         self.base_target_ph = tf.placeholder(tf.float32, shape=[None, num_output])
-        self.task_index_ph = tf.placeholder(tf.int64, shape=[None])
+
+        # function embedding "guessing" network 
+        self.guess_input_ph = tf.placeholder(tf.float32, shape=[None, num_input + num_output])
+
+        guess_hidden_1 = slim.fully_connected(self.guess_input_ph, num_hidden_hyper,
+                                              activation_fn=internal_nonlinearity) 
+        guess_hidden_2 = slim.fully_connected(guess_hidden_1, num_hidden_hyper,
+                                              activation_fn=internal_nonlinearity) 
+        guess_hidden_2b = tf.reduce_max(guess_hidden_2, axis=0, keep_dims=True)
+
+        self.function_embedding = slim.fully_connected(guess_hidden_2b, num_hidden_hyper,
+                                                       activation_fn=None)
 
         # hyper_network 
-        self.function_embeddings = tf.get_variable('function_embedding', shape=[num_tasks, num_hidden_hyper],
-                                                  initializer=tf.random_uniform_initializer(minval=-0.01, maxval=0.01))
 
-        self.assign_f_emb_ph = tf.placeholder(tf.float32, shape=[num_hidden_hyper]) 
-        self.assign_f_ind_ph = tf.placeholder(tf.int64, shape=[1]) 
-        self.assign_f_emb = tf.scatter_update(self.function_embeddings, self.assign_f_ind_ph, tf.expand_dims(self.assign_f_emb_ph, axis=0))
-
-        function_embedding = tf.nn.embedding_lookup(self.function_embeddings, self.task_index_ph)
-
-
-        hyper_hidden_1 = slim.fully_connected(function_embedding, num_hidden_hyper,
-                                              activation_fn=internal_nonlinearity)
+        hyper_hidden = self.function_embedding
+        for _ in range(num_meta_hidden_layers):
+            hyper_hidden = slim.fully_connected(hyper_hidden, num_hidden_hyper,
+                                                activation_fn=internal_nonlinearity)
+        
+        self.hidden_weights = []
+        self.hidden_biases = []
         if hyper_convolutional: 
-            hyper_hidden_2 = slim.fully_connected(hyper_hidden_1, conv_in_channels*(num_hidden + num_hidden + num_output),
+            hyper_hidden = slim.fully_connected(hyper_hidden, conv_in_channels*(num_task_hidden_layers*num_hidden + num_output),
                                                   activation_fn=internal_nonlinearity)
-            hyper_hidden_2 = tf.reshape(hyper_hidden_2, [-1, (num_hidden + num_hidden + num_output), conv_in_channels])
+            hyper_hidden = tf.reshape(hyper_hidden, [-1, (num_task_hidden_layers*num_hidden + num_output), conv_in_channels])
 
-            W1 = slim.convolution(hyper_hidden_2[:, :num_hidden, :], num_input,
-                                  kernel_size=1, padding='SAME',
-                                  activation_fn=None)
-            W1 = tf.transpose(W1, perm=[0, 2, 1])
-            b1 = slim.convolution(hyper_hidden_2[:, :num_hidden, :], 1,
-                                  kernel_size=1, padding='SAME',
-                                  activation_fn=None)
-            b1 = tf.squeeze(b1, axis=-1)
 
-            W2 = slim.convolution(hyper_hidden_2[:, num_hidden:2*num_hidden, :], num_hidden,
-                                  kernel_size=1, padding='SAME',
-                                  activation_fn=None)
-            W2 = tf.transpose(W2, perm=[0, 2, 1])
-            b2 = slim.convolution(hyper_hidden_2[:, num_hidden:2*num_hidden, :], 1,
-                                  kernel_size=1, padding='SAME',
-                                  activation_fn=None)
-            b2 = tf.squeeze(b2, axis=-1)
 
-            W3 = slim.convolution(hyper_hidden_2[:, 2*num_hidden:, :], num_hidden,
+            Wi = slim.convolution(hyper_hidden[:, :num_hidden, :], num_input,
                                   kernel_size=1, padding='SAME',
                                   activation_fn=None)
-            W3 = tf.transpose(W3, perm=[0, 2, 1])
-            b3 = slim.convolution(hyper_hidden_2[:, 2*num_hidden:, :], 1,
+            Wi = tf.transpose(Wi, perm=[0, 2, 1])
+            bi = slim.convolution(hyper_hidden[:, :num_hidden, :], 1,
                                   kernel_size=1, padding='SAME',
                                   activation_fn=None)
-            b3 = tf.squeeze(b3, axis=-1)
+            bi = tf.squeeze(bi, axis=-1)
+            self.hidden_weights.append(Wi)
+            self.hidden_biases.append(bi)
+
+            for i in range(1, num_task_hidden_layers):
+                Wi = slim.convolution(hyper_hidden[:, num_hidden:2*num_hidden, :], num_hidden,
+                                      kernel_size=1, padding='SAME',
+                                      activation_fn=None)
+                Wi = tf.transpose(Wi, perm=[0, 2, 1])
+                self.hidden_weights.append(Wi)
+                bi = slim.convolution(hyper_hidden[:, num_hidden:2*num_hidden, :], 1,
+                                      kernel_size=1, padding='SAME',
+                                      activation_fn=None)
+                bi = tf.squeeze(bi, axis=-1)
+                self.hidden_biases.append(bi)
+
+            Wfinal = slim.convolution(hyper_hidden[:, -num_output:, :], num_hidden,
+                                  kernel_size=1, padding='SAME',
+                                  activation_fn=None)
+            Wfinal = tf.transpose(Wfinal, perm=[0, 2, 1])
+            bfinal = slim.convolution(hyper_hidden[:, -num_output:, :], 1,
+                                  kernel_size=1, padding='SAME',
+                                  activation_fn=None)
+            bfinal = tf.squeeze(bfinal, axis=-1)
 
         else:
-            hyper_hidden_2 = slim.fully_connected(hyper_hidden_1, num_hidden_hyper,
+            hyper_hidden = slim.fully_connected(hyper_hidden, num_hidden_hyper,
                                                   activation_fn=internal_nonlinearity)
-            task_weights = slim.fully_connected(hyper_hidden_2, num_hidden*(num_input + num_hidden + num_output),
+            task_weights = slim.fully_connected(hyper_hidden, num_hidden*(num_input + num_hidden + num_output),
                                                 activation_fn=None)
 
             task_weights = tf.reshape(task_weights, [-1, num_hidden, (num_input + num_hidden + num_output)]) 
 
-            task_biases = slim.fully_connected(hyper_hidden_2, num_hidden + num_hidden + num_output,
+            task_biases = slim.fully_connected(hyper_hidden, num_hidden + num_hidden + num_output,
                                                activation_fn=None)
 
             W1 = tf.transpose(task_weights[:, :, :num_input], perm=[0, 2, 1])
@@ -192,80 +209,64 @@ class meta_model(object):
             b3 = task_biases[:, 2*num_hidden:2*num_hidden + num_output]
 
 
-        # task network
+        for i in range(num_task_hidden_layers):
+            self.hidden_weights[i] = tf.squeeze(self.hidden_weights[i], axis=0)
+            self.hidden_biases[i] = tf.squeeze(self.hidden_biases[i], axis=0)
 
-        task_hidden_1 = internal_nonlinearity(tf.matmul(tf.expand_dims(self.base_input_ph, 1), W1) + tf.expand_dims(b1, 1))
-        task_hidden_2 = internal_nonlinearity(tf.matmul(task_hidden_1, W2) + tf.expand_dims(b2, 1))
-        self.output = tf.squeeze(output_nonlinearity(tf.matmul(task_hidden_2, W3) + tf.expand_dims(b3, 1)), axis=1)
+        Wfinal = tf.squeeze(Wfinal, axis=0)
+        bfinal = tf.squeeze(bfinal, axis=0)
+
+        # task network
+        task_hidden = self.base_input_ph
+        for i in range(num_task_hidden_layers):
+            task_hidden = internal_nonlinearity(tf.matmul(task_hidden, self.hidden_weights[i]) + self.hidden_biases[i])
+        self.output = output_nonlinearity(tf.matmul(task_hidden, Wfinal) + bfinal)
         
         self.base_loss = tf.reduce_sum(tf.square(self.output - self.base_target_ph), axis=1)
         self.total_base_loss = tf.reduce_mean(self.base_loss)
         base_full_optimizer = tf.train.AdamOptimizer(learning_rate)
         self.base_full_train = base_full_optimizer.minimize(self.total_base_loss)
-        
-        base_emb_optimizer = tf.train.AdamOptimizer(learning_rate) # optimizes only embedding
-        self.base_emb_train = base_emb_optimizer.minimize(self.total_base_loss,
-                                                          var_list=[v for v in tf.global_variables() if "function_embedding" in v.name])
-
-        # function "guessing" network 
-        self.guess_input_ph = tf.placeholder(tf.float32, shape=[None, num_input + num_output])
-        self.guess_target_ph = tf.placeholder(tf.float32, shape=[num_hidden_hyper])
-
-        guess_hidden_1 = slim.fully_connected(self.guess_input_ph, num_hidden_hyper,
-                                              activation_fn=internal_nonlinearity) 
-        guess_hidden_2 = slim.fully_connected(guess_hidden_1, num_hidden_hyper,
-                                              activation_fn=internal_nonlinearity) 
-        guess_hidden_2b = tf.reduce_max(guess_hidden_2, axis=0, keep_dims=True)
-
-        self.guess_output = slim.fully_connected(guess_hidden_2b, num_hidden_hyper,
-                                                 activation_fn=None)
-
-        self.guess_loss =  tf.nn.l2_loss(self.guess_output - self.guess_target_ph) 
-        guess_optimizer = tf.train.AdamOptimizer(meta_learning_rate)
-        self.guess_train = guess_optimizer.minimize(self.guess_loss)
 
         # initialize
         self.sess = tf.Session()
         self.sess.run(tf.global_variables_initializer())
         
+    
+    def dataset_eval(self, dataset):
+        this_feed_dict = {
+            self.base_input_ph: dataset["x"],
+            self.guess_input_ph: dataset["x"],
+            self.base_target_ph: dataset["y"]
+        }
+        loss = self.sess.run(self.total_base_loss, feed_dict=this_feed_dict)
+        return loss
+
+
+    def dataset_trainstep(self, dataset):
+        this_feed_dict = {
+            self.base_input_ph: dataset["x"],
+            self.guess_input_ph: dataset["x"],
+            self.base_target_ph: dataset["y"]
+        }
+        loss = self.sess.run(self.base_full_train, feed_dict=this_feed_dict)
+        return loss
+
 
     def base_eval(self):
         """Evaluates loss on the base tasks."""
         losses = np.zeros([len(self.base_tasks)])
-        counts = np.zeros([len(self.base_tasks)])
-        base_task_numbers = range(len(self.base_tasks))
-        order = range(len(self.base_y_data))
-        for batch_i in range(len(self.base_y_data)//batch_size + 1):
-            indices = order[batch_i*batch_size:(batch_i+1) * batch_size]
-            this_batch_task_indices = self.base_task_indices[indices]
-            this_feed_dict = {
-                self.base_input_ph: self.base_x_data[indices, :],
-                self.base_target_ph: self.base_y_data[indices, :],
-                self.task_index_ph: this_batch_task_indices 
-            }
-            this_losses = self.sess.run(self.base_loss, feed_dict=this_feed_dict)
-            for task_i in base_task_numbers: 
-                this_task_indices = this_batch_task_indices == task_i
-                losses[task_i] += np.sum(this_losses[this_task_indices])
-                counts[task_i] += np.sum(this_task_indices)
+        for task in self.base_tasks:
+            dataset =  self.base_datasets[task]
+            losses[self.task_to_index[task]] = self.dataset_eval(dataset)
 
-        return losses/counts
+        return losses
 
 
     def new_eval(self, new_task):
         """Evaluates loss on a new task."""
         new_task_full_name = [t for t in self.new_tasks if new_task in t][0] 
         dataset = self.new_datasets[new_task_full_name]
-        index = self.task_to_index[new_task_full_name]
-        tiled_index = np.tile(index, len(dataset["x"])) 
-        this_feed_dict = {
-            self.base_input_ph: dataset["x"],
-            self.base_target_ph: dataset["y"],
-            self.task_index_ph: tiled_index 
-        }
-        loss = self.sess.run(self.total_base_loss, feed_dict=this_feed_dict)
-
-        return loss
+        return self.dataset_eval(dataset)
 
 
     def new_outputs(self, new_task):
@@ -276,15 +277,14 @@ class meta_model(object):
         tiled_index = np.tile(index, len(dataset["x"])) 
         this_feed_dict = {
             self.base_input_ph: dataset["x"],
-            self.task_index_ph: tiled_index 
+            self.guess_input_ph: dataset["x"]
         }
         outputs = self.sess.run(self.output, feed_dict=this_feed_dict)
         return outputs
 
 
-
-    def train_base_tasks(self, filename):
-        """Train model to perform base tasks."""
+    def train_base_tasks(self, filename_prefix):
+        """Train model to perform base tasks as meta task."""
         with open(filename, "w") as fout:
             fout.write("epoch, " + ", ".join(self.base_tasks) + "\n")
             format_string = ", ".join(["%f" for _ in self.base_tasks]) + "\n"
