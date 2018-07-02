@@ -18,20 +18,20 @@ num_runs = 20
 init_learning_rate = 5e-6
 new_init_learning_rate = 1e-6
 lr_decay = 0.8
-lr_decays_every = 200
-min_learning_rate = 1e-7
+lr_decays_every = 1000
+min_learning_rate = 5e-8
 
 adam_epsilon = 1e-3
 
-max_base_epochs = 20000 
+max_base_epochs = 30000 
 max_new_epochs = 5000 
 num_task_hidden_layers = 3
-num_meta_hidden_layers = 2
+num_meta_hidden_layers = 3
 output_dir = "meta_results/"
 save_every = 10 #20
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
-hyper_convolutional = True # whether hyper network creates weights convolutionally
-conv_in_channels = 4
+hyper_convolutional = False # whether hyper network creates weights convolutionally
+conv_in_channels = 6
 
 batch_size = 16
 meta_batch_size = 12 # how much of each dataset the function embedding guesser sees 
@@ -149,7 +149,7 @@ class meta_model(object):
         # hyper_network 
 
         hyper_hidden = self.function_embedding
-        for _ in range(num_meta_hidden_layers):
+        for _ in range(num_meta_hidden_layers-1):
             hyper_hidden = slim.fully_connected(hyper_hidden, num_hidden_hyper,
                                                 activation_fn=internal_nonlinearity)
         
@@ -197,21 +197,24 @@ class meta_model(object):
         else:
             hyper_hidden = slim.fully_connected(hyper_hidden, num_hidden_hyper,
                                                   activation_fn=internal_nonlinearity)
-            task_weights = slim.fully_connected(hyper_hidden, num_hidden*(num_input + num_hidden + num_output),
+            task_weights = slim.fully_connected(hyper_hidden, num_hidden*(num_input +(num_task_hidden_layers-1)*num_hidden + num_output),
                                                 activation_fn=None)
 
-            task_weights = tf.reshape(task_weights, [-1, num_hidden, (num_input + num_hidden + num_output)]) 
-
-            task_biases = slim.fully_connected(hyper_hidden, num_hidden + num_hidden + num_output,
+            task_weights = tf.reshape(task_weights, [-1, num_hidden, (num_input + (num_task_hidden_layers-1)*num_hidden + num_output)]) 
+            task_biases = slim.fully_connected(hyper_hidden, num_task_hidden_layers * num_hidden + num_output,
                                                activation_fn=None)
 
-            W1 = tf.transpose(task_weights[:, :, :num_input], perm=[0, 2, 1])
-            W2 = task_weights[:, :,  num_input:num_input + num_hidden]
-            W3 = task_weights[:, :,  -num_output:]
-            b1 = task_biases[:, :num_hidden]
-            b2 = task_biases[:, num_hidden:2*num_hidden]
-            b3 = task_biases[:, 2*num_hidden:2*num_hidden + num_output]
-
+            Wi = tf.transpose(task_weights[:, :, :num_input], perm=[0, 2, 1])
+            bi = task_biases[:, :num_hidden]
+            self.hidden_weights.append(Wi)
+            self.hidden_biases.append(bi)
+            for i in range(1, num_task_hidden_layers):
+                Wi = tf.transpose(task_weights[:, :, num_input+(i-1)*num_hidden:num_input+i*num_hidden], perm=[0, 2, 1])
+                bi = task_biases[:, num_hidden*i:num_hidden*(i+1)]
+                self.hidden_weights.append(Wi)
+                self.hidden_biases.append(bi)
+            Wfinal = task_weights[:, :, -num_output:]
+            bfinal = task_biases[:, -num_output:]
 
         for i in range(num_task_hidden_layers):
             self.hidden_weights[i] = tf.squeeze(self.hidden_weights[i], axis=0)
