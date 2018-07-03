@@ -18,7 +18,7 @@ num_runs = 20
 init_learning_rate = 5e-6
 new_init_learning_rate = 1e-6
 lr_decay = 0.8
-lr_decays_every = 1000
+lr_decays_every = 500
 min_learning_rate = 5e-8
 
 adam_epsilon = 1e-3
