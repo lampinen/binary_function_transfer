@@ -15,28 +15,28 @@ num_output = 1
 num_hidden = 16
 num_hidden_hyper = 64
 num_runs = 20 
-learning_rate = 0.00001
-meta_learning_rate = 0.00001
+learning_rate = 5e-5
+meta_learning_rate = 5e-6
 num_task_hidden_layers = 3
-num_meta_hidden_layers = 3
+num_meta_hidden_layers = 2
 
-max_base_epochs = 3000 
-max_meta_epochs = 2000 
+max_base_epochs = 10000 
+max_meta_epochs = 5000 
 max_new_epochs = 500 
 output_dir = "meta_results/"
 save_every = 10 #20
 save_every_meta = 10
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
-hyper_convolutional = True # whether hyper network creates weights convolutionally
+hyper_convolutional = False # whether hyper network creates weights convolutionally
 conv_in_channels = 4
 
 batch_size = 32
 meta_batch_size = 12 # how much of each dataset you see each meta train step
 early_stopping_thresh = 0.005
 meta_early_stopping_thresh = 0.001
-base_tasks = ["X0", "NOTX0", "XOR", "threeparity", "NXOR", "OR", "AND"]
+base_tasks = ["X0", "NOTX0", "XOR", "threeparity", "OR", "AND", "NAND"]
 base_task_repeats = 5 # how many times each base task is seen
-new_tasks = ["AND", "OR", "X0NOTX1", "XOR", "NXOR", "XOR_of_XORs"]
+new_tasks = ["AND", "OR", "X0NOTX1", "NAND", "NOR", "XOR", "NXOR"]
 ###
 var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1., mode='FAN_AVG')
 
@@ -70,6 +70,10 @@ def _get_dataset(task, num_input):
         x_data, y_data = datasets.XOR_of_XORs_dataset(num_input)
     elif task == "NXOR":
         x_data, y_data = datasets.NXOR_dataset(num_input)
+    elif task == "NAND":
+        x_data, y_data = datasets.NAND_dataset(num_input)
+    elif task == "NOR":
+        x_data, y_data = datasets.NOR_dataset(num_input)
     elif task == "AND":
         x_data, y_data = datasets.AND_dataset(num_input)
     elif task == "OR":
