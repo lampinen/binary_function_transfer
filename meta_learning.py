@@ -207,10 +207,10 @@ class meta_model(object):
             bfinal = task_biases[:, -num_output:]
 
         # task network
-	task_hidden = tf.expand_dims(self.base_input_ph, 1)
+        task_hidden = tf.expand_dims(self.base_input_ph, 1)
 
-	for i in range(num_task_hidden_layers):
-	    task_hidden = internal_nonlinearity(tf.matmul(task_hidden, self.hidden_weights[i]) + tf.expand_dims(self.hidden_biases[i], 1))
+        for i in range(num_task_hidden_layers):
+            task_hidden = internal_nonlinearity(tf.matmul(task_hidden, self.hidden_weights[i]) + tf.expand_dims(self.hidden_biases[i], 1))
 
         self.output = tf.squeeze(output_nonlinearity(tf.matmul(task_hidden, Wfinal) + tf.expand_dims(bfinal, 1)), axis=1)
         
@@ -454,7 +454,7 @@ class meta_model(object):
                 
 ## running stuff
 
-for run_i in xrange(num_runs):
+for run_i in range(num_runs):
     np.random.seed(run_i)
     perm_list_dict = {task: (np.random.permutation(perm_list_template) if task not in ["XO", "NOTX0", "threeparity"] else np.random.permutation(single_perm_list_template)) for task in total_tasks} 
     tf.set_random_seed(run_i)
