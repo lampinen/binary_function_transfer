@@ -12,19 +12,20 @@ PI = np.pi
 ### Parameters
 num_input = 4
 num_output = 1
-num_hidden = 16
+num_hidden = 4
 num_hidden_hyper = 64
 num_runs = 20 
-init_learning_rate = 5e-6
+init_learning_rate = 1e-4
 new_init_learning_rate = 1e-6
 lr_decay = 0.8
-lr_decays_every = 500
-min_learning_rate = 5e-8
+lr_decays_every = 200
+min_learning_rate = 1e-7
 
+train_momentum = 0.8
 adam_epsilon = 1e-3
 
-max_base_epochs = 30000 
-max_new_epochs = 5000 
+max_base_epochs = 5000 
+max_new_epochs = 1000 
 num_task_hidden_layers = 3
 num_meta_hidden_layers = 3
 output_dir = "meta_results/"
@@ -142,8 +143,10 @@ class meta_model(object):
         guess_hidden_2 = slim.fully_connected(guess_hidden_1, num_hidden_hyper,
                                               activation_fn=internal_nonlinearity) 
         guess_hidden_2b = tf.reduce_max(guess_hidden_2, axis=0, keep_dims=True)
+        guess_hidden_3 = slim.fully_connected(guess_hidden_2b, num_hidden_hyper,
+                                              activation_fn=internal_nonlinearity) 
 
-        self.function_embedding = slim.fully_connected(guess_hidden_2b, num_hidden_hyper,
+        self.function_embedding = slim.fully_connected(guess_hidden_3, num_hidden_hyper,
                                                        activation_fn=None)
 
         # hyper_network 
@@ -231,7 +234,7 @@ class meta_model(object):
         
         self.base_loss = tf.reduce_sum(tf.square(self.output - self.base_target_ph), axis=1)
         self.total_base_loss = tf.reduce_mean(self.base_loss)
-        base_full_optimizer = tf.train.AdamOptimizer(self.lr_ph, epsilon=adam_epsilon)
+        base_full_optimizer = tf.train.MomentumOptimizer(self.lr_ph, train_momentum)
         self.base_full_train = base_full_optimizer.minimize(self.total_base_loss)
 
         # initialize
