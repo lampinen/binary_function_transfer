@@ -15,7 +15,7 @@ num_output = 1
 num_hidden = 4
 num_hidden_hyper = 64
 num_runs = 20 
-init_learning_rate = 1e-4
+init_learning_rate = 3e-5
 new_init_learning_rate = 1e-6
 lr_decay = 0.8
 lr_decays_every = 200
@@ -24,7 +24,7 @@ min_learning_rate = 1e-7
 train_momentum = 0.8
 adam_epsilon = 1e-3
 
-max_base_epochs = 5000 
+max_base_epochs = 10000 
 max_new_epochs = 1000 
 num_task_hidden_layers = 3
 num_meta_hidden_layers = 3
@@ -37,7 +37,7 @@ conv_in_channels = 6
 batch_size = 16
 meta_batch_size = 12 # how much of each dataset the function embedding guesser sees 
 early_stopping_thresh = 0.005
-base_tasks = ["X0", "NOTX0", "XOR", "NOR", "OR", "AND"]
+base_tasks = ["X0", "NOTX0", "XOR", "NOR", "OR", "AND", "NXOR"]
 base_task_repeats = 5 # how many times each base task is seen
 new_tasks = ["X0", "AND", "OR", "NOR", "NAND", "X0NOTX1", "XOR", "XOR_of_XORs"]
 ###
