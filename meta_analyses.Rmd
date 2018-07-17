@@ -14,28 +14,28 @@ theme_set(theme_bw() +
 ```
 
 ```{r}
-nruns = 20
-newtasks = c("X0", "X0NOTX1", "XOR", "AND", "XOR_of_XORs")
+nruns = 10
 
 d = data.frame()
 for (run_i in 0:(nruns-1)) {
-  for (new_task in newtasks) {
-    this_d = read.csv(sprintf("meta_results/run%i_new_%s.csv", run_i, new_task), header=T)
-    this_d$run = run_i
-    this_d$new_task = new_task
-    d = bind_rows(d, this_d)
-  }
+  this_d = read.csv(sprintf("meta_results/run%i_new_new_losses.csv", run_i), header=T)
+  this_d$run = run_i
+  this_d = this_d %>% 
+    select(run, epoch, contains("new")) %>%
+    gather(new_task, loss, contains("new")) %>%
+    mutate(new_task=gsub("\\..*","",new_task))
+
+  d = bind_rows(d, this_d)
 }
 ```
 
 ```{r}
 guess_summarized_d = d %>%
   group_by(new_task, run) %>%
-  summarize(random = head(loss, 1),
-            guess = tail(head(loss, 2), 1),
+  summarize(guess = head(loss, 1),
             trained = tail(loss, 1)) %>%
   ungroup() %>%
-  gather(type, loss, random, guess, trained) %>%
+  gather(type, loss, guess, trained) %>%
   group_by(new_task, type) %>%
   summarize(loss_sd = sd(loss),
             loss = mean(loss),
@@ -43,14 +43,15 @@ guess_summarized_d = d %>%
             loss_ci_hi = loss + 1.96 * loss_sd/sqrt(n())) %>%
   ungroup() %>%
   mutate(type=factor(type,
-                     levels=c("random", "guess", "trained")))
+                     levels=c("guess", "trained")))
 ```
 
 ```{r}
 ggplot(data=guess_summarized_d, aes(x=new_task, y=loss, fill=type)) +
   geom_bar(stat="identity", position="dodge") + 
   geom_errorbar(aes(ymin=loss_ci_lo, ymax=loss_ci_hi), position="dodge") +
-  scale_fill_brewer(palette="Dark2")
+  scale_fill_brewer(palette="Dark2") +
+  geom_hline(yintercept=1.0, alpha=0.5, linetype=2)
 ```
 ```{r}
 ggsave("plots/meta/meta_res.png")
@@ -59,26 +60,20 @@ ggsave("plots/meta/meta_res.png")
 # embeddings
 
 ```{r}
-emb_d = data.frame()
-for (run_i in 0:(nruns-1)) {
-  this_d = read.csv(sprintf("meta_results/run%i_final_embeddings.csv", run_i), header=T)
-  this_d$run = run_i
-  emb_d = bind_rows(emb_d, this_d)
+for (emb_type in c("guess", "final")) {
+  emb_d = data.frame()
+  for (run_i in 0:(nruns-1)) {
+    this_d = read.csv(sprintf("meta_results/run%i_%s_embeddings.csv", run_i, emb_type), header=T)
+    this_d$run = run_i
+    emb_d = bind_rows(emb_d, this_d)
+  }
+  pcs = prcomp(emb_d %>% select(-dimension, -run), center=T, scale=T)
+  pc_d = data.frame(pcs$rotation)
+  pc_d$task = row.names(pc_d)
+  ggplot(pc_d, aes(x=PC1, y=PC2, color=task)) +
+    geom_point() +
+    geom_text(aes(label=task)) 
+  ggsave(sprintf("plots/meta/PCA_%s.png", emb_type), width=10, height=7)
 }
-```
-
-```{r}
-pcs = prcomp(emb_d %>% select(-dimension, -run), center=T, scale=T)
-pc_d = data.frame(pcs$rotation)
-pc_d$task = row.names(pc_d)
-```
-
-```{r}
-ggplot(pc_d, aes(x=PC1, y=PC2, color=task)) +
-  geom_point() +
-  geom_text(aes(label=task))
-```
-```{r}
-ggsave("plots/meta/PCA.png", width=10, height=7)
 ```
 

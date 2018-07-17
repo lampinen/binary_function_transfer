@@ -12,33 +12,34 @@ PI = np.pi
 ### Parameters
 num_input = 4
 num_output = 1
-num_hidden = 16
+num_hidden = 4
 num_hidden_hyper = 64
 num_runs = 20 
-learning_rate = 5e-3
-meta_learning_rate = 5e-4
-num_task_hidden_layers = 2
-num_hyper_hidden_layers = 2
-train_keep_prob = 0.8
+init_learning_rate = 3e-5
+new_init_learning_rate = 1e-6
+lr_decay = 0.8
+lr_decays_every = 200
+min_learning_rate = 1e-7
+
+train_momentum = 0.8
+adam_epsilon = 1e-3
 
 max_base_epochs = 10000 
-max_meta_epochs = 5000 
-max_new_epochs = 500 
+max_new_epochs = 1000 
+num_task_hidden_layers = 3
+num_meta_hidden_layers = 3
 output_dir = "meta_results/"
 save_every = 10 #20
-save_every_meta = 10
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 hyper_convolutional = False # whether hyper network creates weights convolutionally
-conv_in_channels = 8
+conv_in_channels = 6
 
-batch_size = 32
-meta_batch_size = 12 # how much of each dataset you see each meta train step
+batch_size = 16
+meta_batch_size = 12 # how much of each dataset the function embedding guesser sees 
 early_stopping_thresh = 0.005
-meta_early_stopping_thresh = 0.001
-base_tasks = ["X0", "NOTX0", "XOR", "NXOR", "AND", "OR", "NAND", "threeparity"]
+base_tasks = ["X0", "NOTX0", "XOR", "NOR", "OR", "AND", "NXOR"]
 base_task_repeats = 5 # how many times each base task is seen
-new_tasks = ["AND", "OR", "X0NOTX1", "NAND", "NOR", "XOR", "NXOR"]
-shuffle_perms = True 
+new_tasks = ["X0", "AND", "OR", "NOR", "NAND", "X0NOTX1", "XOR", "XOR_of_XORs"]
 ###
 var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1., mode='FAN_AVG')
 
@@ -52,10 +53,7 @@ else:
 perm_list_template = [(0, 1, 2, 3), (0, 2, 1, 3), (0, 2, 3, 1), (2, 0, 1, 3), (2, 0, 3, 1), (2, 3, 0, 1)]
 single_perm_list_template = [(0, 1, 2, 3), (1, 2, 3, 0), (2, 3, 0, 1), (3, 0, 1, 2), (0, 1, 2, 3), (1, 2, 3, 0), (2, 3, 0, 1), (3, 0, 1, 2)]
 total_tasks = set(base_tasks + new_tasks)
-if shuffle_perms:
-    perm_list_dict = {task: (np.random.permutation(perm_list_template) if task not in ["XO", "NOTX0", "threeparity"] else np.random.permutation(single_perm_list_template)) for task in total_tasks} 
-else:
-    perm_list_dict = {task: perm_list_template if task not in ["XO", "NOTX0", "threeparity"] else single_perm_list_template for task in total_tasks} 
+perm_list_dict = {task: (np.random.permutation(perm_list_template) if task not in ["XO", "NOTX0", "threeparity"] else np.random.permutation(single_perm_list_template)) for task in total_tasks} 
 
 def _get_perm(task):
     perm = np.copy(perm_list_dict[task][0, :])
@@ -75,14 +73,14 @@ def _get_dataset(task, num_input):
         x_data, y_data = datasets.XOR_of_XORs_dataset(num_input)
     elif task == "NXOR":
         x_data, y_data = datasets.NXOR_dataset(num_input)
-    elif task == "NAND":
-        x_data, y_data = datasets.NAND_dataset(num_input)
-    elif task == "NOR":
-        x_data, y_data = datasets.NOR_dataset(num_input)
     elif task == "AND":
         x_data, y_data = datasets.AND_dataset(num_input)
     elif task == "OR":
         x_data, y_data = datasets.OR_dataset(num_input)
+    elif task == "NAND":
+        x_data, y_data = datasets.NAND_dataset(num_input)
+    elif task == "NOR":
+        x_data, y_data = datasets.NOR_dataset(num_input)
     elif task == "parity":
         x_data, y_data = datasets.parity_dataset(num_input)
     elif task == "threeparity":
@@ -111,14 +109,13 @@ class meta_model(object):
         nbdpt = len(base_tasks) * base_task_repeats * nbdpp
         self.base_x_data = np.zeros([nbdpt, num_input]) 
         self.base_y_data = np.zeros([nbdpt, num_output]) 
-        self.base_task_indices = np.zeros([nbdpt]) 
+        self.base_datasets = {}
 
         for task_i, task_name in enumerate(base_tasks * base_task_repeats):
             dataset = _get_dataset(task_name, num_input)
-            self.base_x_data[task_i*nbdpp:(task_i+1)*nbdpp, :] = dataset["x"]
-            self.base_y_data[task_i*nbdpp:(task_i+1)*nbdpp, :] = dataset["y"]
-            self.base_task_indices[task_i*nbdpp:(task_i+1)*nbdpp] = task_i
-            self.base_tasks.append(task_name + ";" + str(dataset["relevant"][0]) + str(dataset["relevant"][1]) + ";old" + str(task_i)) 
+            task_full_name = task_name + ";" + str(dataset["relevant"][0]) + str(dataset["relevant"][1]) + ";old" + str(task_i)
+            self.base_datasets[task_full_name] = dataset 
+            self.base_tasks.append(task_full_name) 
 
         # new datasets
         self.new_tasks = []
@@ -129,38 +126,41 @@ class meta_model(object):
             self.new_datasets[task_full_name] = dataset
             self.new_tasks.append(task_full_name) 
 
-        self.num_tasks = num_tasks = len(self.base_tasks) + len(self.new_tasks)
+        self.all_tasks = self.base_tasks + self.new_tasks
+        self.num_tasks = num_tasks = len(self.all_tasks)
         self.task_to_index = dict(zip(self.base_tasks + self.new_tasks, range(num_tasks)))
-
 
         # network
         self.base_input_ph = tf.placeholder(tf.float32, shape=[None, num_input])
         self.base_target_ph = tf.placeholder(tf.float32, shape=[None, num_output])
-        self.task_index_ph = tf.placeholder(tf.int64, shape=[None])
-        self.keep_ph = tf.placeholder(tf.float32)
+        self.lr_ph = tf.placeholder(tf.float32)
+
+        # function embedding "guessing" network 
+        self.guess_input_ph = tf.placeholder(tf.float32, shape=[None, num_input + num_output])
+
+        guess_hidden_1 = slim.fully_connected(self.guess_input_ph, num_hidden_hyper,
+                                              activation_fn=internal_nonlinearity) 
+        guess_hidden_2 = slim.fully_connected(guess_hidden_1, num_hidden_hyper,
+                                              activation_fn=internal_nonlinearity) 
+        guess_hidden_2b = tf.reduce_max(guess_hidden_2, axis=0, keep_dims=True)
+        guess_hidden_3 = slim.fully_connected(guess_hidden_2b, num_hidden_hyper,
+                                              activation_fn=internal_nonlinearity) 
+
+        self.function_embedding = slim.fully_connected(guess_hidden_3, num_hidden_hyper,
+                                                       activation_fn=None)
 
         # hyper_network 
-        self.function_embeddings = tf.get_variable('function_embedding', shape=[num_tasks, num_hidden_hyper],
-                                                  initializer=tf.random_uniform_initializer(minval=-0.01, maxval=0.01))
 
-        self.assign_f_emb_ph = tf.placeholder(tf.float32, shape=[num_hidden_hyper]) 
-        self.assign_f_ind_ph = tf.placeholder(tf.int64, shape=[1]) 
-        self.assign_f_emb = tf.scatter_update(self.function_embeddings, self.assign_f_ind_ph, tf.expand_dims(self.assign_f_emb_ph, axis=0))
-
-        function_embedding = tf.nn.embedding_lookup(self.function_embeddings, self.task_index_ph)
-
-        hyper_hidden = slim.dropout(function_embedding, self.keep_ph)
-        for _ in range(num_hyper_hidden_layers-1):
+        hyper_hidden = self.function_embedding
+        for _ in range(num_meta_hidden_layers-1):
             hyper_hidden = slim.fully_connected(hyper_hidden, num_hidden_hyper,
                                                 activation_fn=internal_nonlinearity)
-            hyper_hidden = slim.dropout(hyper_hidden, self.keep_ph)
-
+        
         self.hidden_weights = []
         self.hidden_biases = []
-        if hyper_convolutional:
+        if hyper_convolutional: 
             hyper_hidden = slim.fully_connected(hyper_hidden, conv_in_channels*(num_task_hidden_layers*num_hidden + num_output),
                                                   activation_fn=internal_nonlinearity)
-            hyper_hidden = slim.dropout(hyper_hidden, self.keep_ph)
             hyper_hidden = tf.reshape(hyper_hidden, [-1, (num_task_hidden_layers*num_hidden + num_output), conv_in_channels])
 
 
@@ -181,13 +181,11 @@ class meta_model(object):
                                       kernel_size=1, padding='SAME',
                                       activation_fn=None)
                 Wi = tf.transpose(Wi, perm=[0, 2, 1])
-                Wi = slim.dropout(Wi, self.keep_ph)
                 self.hidden_weights.append(Wi)
                 bi = slim.convolution(hyper_hidden[:, num_hidden:2*num_hidden, :], 1,
                                       kernel_size=1, padding='SAME',
                                       activation_fn=None)
                 bi = tf.squeeze(bi, axis=-1)
-                bi = slim.dropout(bi, self.keep_ph)
                 self.hidden_biases.append(bi)
 
             Wfinal = slim.convolution(hyper_hidden[:, -num_output:, :], num_hidden,
@@ -202,15 +200,12 @@ class meta_model(object):
         else:
             hyper_hidden = slim.fully_connected(hyper_hidden, num_hidden_hyper,
                                                   activation_fn=internal_nonlinearity)
-            hyper_hidden = slim.dropout(hyper_hidden, self.keep_ph)
             task_weights = slim.fully_connected(hyper_hidden, num_hidden*(num_input +(num_task_hidden_layers-1)*num_hidden + num_output),
                                                 activation_fn=None)
-            task_weights = slim.dropout(task_weights, self.keep_ph)
 
-            task_weights = tf.reshape(task_weights, [-1, num_hidden, (num_input + (num_task_hidden_layers-1)*num_hidden + num_output)])
+            task_weights = tf.reshape(task_weights, [-1, num_hidden, (num_input + (num_task_hidden_layers-1)*num_hidden + num_output)]) 
             task_biases = slim.fully_connected(hyper_hidden, num_task_hidden_layers * num_hidden + num_output,
                                                activation_fn=None)
-            task_biases = slim.dropout(task_biases, self.keep_ph)
 
             Wi = tf.transpose(task_weights[:, :, :num_input], perm=[0, 2, 1])
             bi = task_biases[:, :num_hidden]
@@ -224,126 +219,117 @@ class meta_model(object):
             Wfinal = task_weights[:, :, -num_output:]
             bfinal = task_biases[:, -num_output:]
 
-        # task network
-        task_hidden = tf.expand_dims(self.base_input_ph, 1)
-
         for i in range(num_task_hidden_layers):
-            task_hidden = internal_nonlinearity(tf.matmul(task_hidden, self.hidden_weights[i]) + tf.expand_dims(self.hidden_biases[i], 1))
+            self.hidden_weights[i] = tf.squeeze(self.hidden_weights[i], axis=0)
+            self.hidden_biases[i] = tf.squeeze(self.hidden_biases[i], axis=0)
 
-        self.output = tf.squeeze(output_nonlinearity(tf.matmul(task_hidden, Wfinal) + tf.expand_dims(bfinal, 1)), axis=1)
+        Wfinal = tf.squeeze(Wfinal, axis=0)
+        bfinal = tf.squeeze(bfinal, axis=0)
+
+        # task network
+        task_hidden = self.base_input_ph
+        for i in range(num_task_hidden_layers):
+            task_hidden = internal_nonlinearity(tf.matmul(task_hidden, self.hidden_weights[i]) + self.hidden_biases[i])
+        self.output = output_nonlinearity(tf.matmul(task_hidden, Wfinal) + bfinal)
         
         self.base_loss = tf.reduce_sum(tf.square(self.output - self.base_target_ph), axis=1)
         self.total_base_loss = tf.reduce_mean(self.base_loss)
-        base_full_optimizer = tf.train.MomentumOptimizer(learning_rate, 0.8)
+        base_full_optimizer = tf.train.MomentumOptimizer(self.lr_ph, train_momentum)
         self.base_full_train = base_full_optimizer.minimize(self.total_base_loss)
-        
-        base_emb_optimizer = tf.train.MomentumOptimizer(learning_rate, 0.8) # optimizes only embedding
-        self.base_emb_train = base_emb_optimizer.minimize(self.total_base_loss,
-                                                          var_list=[v for v in tf.global_variables() if "function_embedding" in v.name])
-
-        # meta/function "guessing" network 
-        self.guess_input_ph = tf.placeholder(tf.float32, shape=[None, num_input + num_output])
-        self.guess_target_ph = tf.placeholder(tf.float32, shape=[num_hidden_hyper])
-
-        guess_hidden_1 = slim.fully_connected(self.guess_input_ph, num_hidden_hyper,
-                                              activation_fn=internal_nonlinearity) 
-        guess_hidden_1 = slim.dropout(guess_hidden_1, self.keep_ph)
-        guess_hidden_2 = slim.fully_connected(guess_hidden_1, num_hidden_hyper,
-                                              activation_fn=internal_nonlinearity) 
-        guess_hidden_2b = tf.reduce_max(guess_hidden_2, axis=0, keep_dims=True)
-        guess_hidden_2b = slim.dropout(guess_hidden_2b, self.keep_ph)
-
-        guess_hidden_3 = slim.fully_connected(guess_hidden_2b, num_hidden_hyper,
-                                              activation_fn=internal_nonlinearity)
-        guess_hidden_3 = slim.dropout(guess_hidden_3, self.keep_ph)
-
-        self.guess_output = slim.dropout(slim.fully_connected(guess_hidden_2b, num_hidden_hyper,
-                                                              activation_fn=None),
-                                         self.keep_ph)
-
-        self.guess_loss =  tf.nn.l2_loss(self.guess_output - self.guess_target_ph) 
-        guess_optimizer = tf.train.MomentumOptimizer(meta_learning_rate, 0.8)
-        self.guess_train = guess_optimizer.minimize(self.guess_loss)
 
         # initialize
         self.sess = tf.Session()
         self.sess.run(tf.global_variables_initializer())
         
+    
+    def _guess_dataset(self, dataset):
+        return np.concatenate([dataset["x"], dataset["y"]*float(num_input)/num_output],
+                              axis=1)
+
+    
+    def dataset_eval(self, dataset, zeros=False):
+        guess_dataset = self._guess_dataset(dataset)
+        this_feed_dict = {
+            self.base_input_ph: dataset["x"],
+            self.guess_input_ph: np.zeros_like(guess_dataset) if zeros else guess_dataset,
+            self.base_target_ph: dataset["y"]
+        }
+        loss = self.sess.run(self.total_base_loss, feed_dict=this_feed_dict)
+        return loss
+
+
+    def dataset_train_step(self, dataset, lr):
+        guess_subset = np.random.permutation(len(dataset["y"]))[:meta_batch_size]
+        this_feed_dict = {
+            self.base_input_ph: dataset["x"],
+            self.guess_input_ph: self._guess_dataset(dataset)[guess_subset, :],
+            self.base_target_ph: dataset["y"],
+            self.lr_ph: lr
+        }
+        loss = self.sess.run(self.base_full_train, feed_dict=this_feed_dict)
+        return loss
+
 
     def base_eval(self):
         """Evaluates loss on the base tasks."""
         losses = np.zeros([len(self.base_tasks)])
-        counts = np.zeros([len(self.base_tasks)])
-        base_task_numbers = range(len(self.base_tasks))
-        order = range(len(self.base_y_data))
-        for batch_i in range(len(self.base_y_data)//batch_size + 1):
-            indices = order[batch_i*batch_size:(batch_i+1) * batch_size]
-            this_batch_task_indices = self.base_task_indices[indices]
-            this_feed_dict = {
-                self.base_input_ph: self.base_x_data[indices, :],
-                self.base_target_ph: self.base_y_data[indices, :],
-                self.keep_ph: 1.,
-                self.task_index_ph: this_batch_task_indices 
-            }
-            this_losses = self.sess.run(self.base_loss, feed_dict=this_feed_dict)
-            for task_i in base_task_numbers: 
-                this_task_indices = this_batch_task_indices == task_i
-                losses[task_i] += np.sum(this_losses[this_task_indices])
-                counts[task_i] += np.sum(this_task_indices)
+        for task in self.base_tasks:
+            dataset =  self.base_datasets[task]
+            losses[self.task_to_index[task]] = self.dataset_eval(dataset)
 
-        return losses/counts
+        return losses
 
 
-    def new_eval(self, new_task):
+    def new_eval(self, new_task, zeros=False):
         """Evaluates loss on a new task."""
         new_task_full_name = [t for t in self.new_tasks if new_task in t][0] 
         dataset = self.new_datasets[new_task_full_name]
-        index = self.task_to_index[new_task_full_name]
-        tiled_index = np.tile(index, len(dataset["x"])) 
-        this_feed_dict = {
-            self.base_input_ph: dataset["x"],
-            self.base_target_ph: dataset["y"],
-            self.keep_ph: 1.,
-            self.task_index_ph: tiled_index 
-        }
-        loss = self.sess.run(self.total_base_loss, feed_dict=this_feed_dict)
-
-        return loss
+        return self.dataset_eval(dataset, zeros=zeros)
 
 
-    def new_outputs(self, new_task):
-        """Returns outputs on a new task."""
+    def all_eval(self):
+        """Evaluates loss on the base and new tasks."""
+        losses = np.zeros([self.num_tasks])
+        for task in self.base_tasks:
+            dataset =  self.base_datasets[task]
+            losses[self.task_to_index[task]] = self.dataset_eval(dataset)
+
+        for task in self.new_tasks:
+            dataset =  self.new_datasets[task]
+            losses[self.task_to_index[task]] = self.dataset_eval(dataset)
+
+        return losses
+
+
+    def new_outputs(self, new_task, zeros=False):
+        """Returns outputs on a new task.
+           zeros: if True, will give empty dataset to guessing net, for
+           baseline"""
         new_task_full_name = [t for t in self.new_tasks if new_task in t][0] 
         dataset = self.new_datasets[new_task_full_name]
-        index = self.task_to_index[new_task_full_name]
-        tiled_index = np.tile(index, len(dataset["x"])) 
+        guess_dataset = self._guess_dataset(dataset)
         this_feed_dict = {
-            self.keep_ph: 1.,
             self.base_input_ph: dataset["x"],
-            self.task_index_ph: tiled_index 
+            self.guess_input_ph: np.zeros_like(guess_dataset) if zeros else guess_dataset,
         }
         outputs = self.sess.run(self.output, feed_dict=this_feed_dict)
         return outputs
 
 
-
     def train_base_tasks(self, filename):
-        """Train model to perform base tasks."""
+        """Train model to perform base tasks as meta task."""
         with open(filename, "w") as fout:
             fout.write("epoch, " + ", ".join(self.base_tasks) + "\n")
             format_string = ", ".join(["%f" for _ in self.base_tasks]) + "\n"
 
+            learning_rate = init_learning_rate
+
             for epoch in range(max_base_epochs):
-                order = np.random.permutation(len(self.base_task_indices))
-                for batch_i in range(len(order)//batch_size):
-                    indices = order[batch_i*batch_size:(batch_i+1) * batch_size]
-                    this_feed_dict = {
-                        self.keep_ph: train_keep_prob,
-                        self.base_input_ph: self.base_x_data[indices, :],
-                        self.base_target_ph: self.base_y_data[indices, :],
-                        self.task_index_ph: self.base_task_indices[indices]
-                    }
-                    self.sess.run(self.base_full_train, feed_dict=this_feed_dict)
+                order = np.random.permutation(len(self.base_tasks))
+                for task_i in order:
+                    task = self.base_tasks[task_i]
+                    dataset =  self.base_datasets[task]
+                    self.dataset_train_step(dataset, learning_rate)
 
                 if epoch % save_every == 0:
                     curr_losses = self.base_eval()
@@ -354,119 +340,63 @@ class meta_model(object):
                         print("Early stop base!")
                         break
 
-
-    def train_meta_task(self, filename):
-        """Trains network to predict embeddings of the base tasks from the task
-           data."""
-        with open(filename, "w") as fout:
-            fout.write("epoch, " + ", ".join(self.base_tasks) + "\n")
-            format_string = ", ".join(["%f" for _ in self.base_tasks]) + "\n"
-            print("Training meta")
-            base_task_embeddings = self.sess.run(self.function_embeddings) 
-#            print(pdist(base_task_embeddings))
-
-            def _dataset_to_meta_point(task_i):
-                this_task_indices = self.base_task_indices == task_i
-                return np.concatenate([self.base_x_data[this_task_indices, :],
-                                       self.base_y_data[this_task_indices, :]*self.num_input/self.num_output],
-                                      axis=1), base_task_embeddings[task_i, :] 
-
-            meta_sets = [_dataset_to_meta_point(task_i) for task_i in range(len(self.base_tasks))]
-            curr_losses = np.zeros(len(meta_sets))
-
-            for epoch in range(max_meta_epochs): 
-                meta_order = np.random.permutation(len(meta_sets))
-                for task_index in meta_order:
-                    data, embedding = meta_sets[task_index] 
-                    order = np.random.permutation(len(data))
-                    order = order[:meta_batch_size]
-                    this_feed_dict = {
-                        self.keep_ph: train_keep_prob, 
-                        self.guess_input_ph: data[order, :],
-                        self.guess_target_ph: embedding
-                    }
-                    _, this_loss = self.sess.run([self.guess_train, self.guess_loss], feed_dict=this_feed_dict)
-                    curr_losses[task_index] = this_loss
-
-                curr_output = ("%i, " % epoch) + (format_string % tuple(curr_losses))
-                fout.write(curr_output)
-                print(curr_output)
-
-                if np.all(curr_losses < meta_early_stopping_thresh):
-                    print("Stopping meta early!")
-                    break
+                if epoch % lr_decays_every == 0 and epoch > 0 and learning_rate > min_learning_rate:
+                    learning_rate *= lr_decay
 
 
     def train_new_tasks(self, filename_prefix):
-        for new_task in new_tasks:
-            print("Now training new task: " + new_task)
-            new_task_full_name = [t for t in self.new_tasks if new_task in t][0] 
-            print(new_task_full_name)
-            print(self.task_to_index)
-            index = self.task_to_index[new_task_full_name]
-            dataset = self.new_datasets[new_task_full_name]
+        print("Now training new tasks...")
 
-            # meta-network guess at optimal embedding
-            this_feed_dict = {
-                self.keep_ph: 1.,
-                self.guess_input_ph: np.concatenate([dataset["x"],
-                                                     dataset["y"]*self.num_input/self.num_output],
-                                                    axis=1)
-            }
-            embedding_guess = self.sess.run(self.guess_output,
-                                            feed_dict=this_feed_dict)[0] 
+        with open(filename_prefix + "new_losses.csv", "w") as fout:
+            fout.write("epoch, " + ", ".join(self.base_tasks + self.new_tasks) + "\n")
+            format_string = ", ".join(["%f" for _ in self.base_tasks + self.new_tasks]) + "\n"
 
-            with open(filename_prefix + new_task + ".csv", "w") as fout:
+            for new_task in self.new_tasks:
+                dataset = self.new_datasets[new_task]
                 with open(filename_prefix + new_task + "_outputs.csv", "w") as foutputs:
                     foutputs.write("type, " + ', '.join(["input%i" % i for i in range(len(dataset["y"]))]) + "\n")
                     foutputs.write("target, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(dataset["y"].flatten()) + "\n")
 
-                    fout.write("epoch, %s\n" % new_task_full_name)
-                    curr_loss = self.new_eval(new_task) # random embedding 
-                    curr_net_outputs = self.new_outputs(new_task)
-                    foutputs.write("random_emb, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(curr_net_outputs) + "\n")
-                    curr_output = "%i, %f\n" % (-1, curr_loss) 
-                    fout.write(curr_output)
-                    print(curr_output)
-
-                    # update with meta network guess
-                    self.sess.run(self.assign_f_emb, feed_dict={
-                            self.assign_f_emb_ph: embedding_guess,
-                            self.assign_f_ind_ph: np.array([index])
-                        })
-
-                    curr_loss = self.new_eval(new_task) # guess embedding 
-                    curr_output = "%i, %f\n" % (0, curr_loss) 
-                    fout.write(curr_output)
-                    print(curr_output)
-                    curr_net_outputs = self.new_outputs(new_task)
+                    curr_net_outputs = self.new_outputs(new_task, zeros=True)
+                    foutputs.write("baseline, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(curr_net_outputs) + "\n")
+                    curr_net_outputs = self.new_outputs(new_task, zeros=False)
                     foutputs.write("guess_emb, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(curr_net_outputs) + "\n")
 
-                    # now tune only embedding
-                    for epoch in range(1, max_new_epochs):
-                        order = np.random.permutation(len(dataset["x"]))
-                        for batch_i in range(len(order)//batch_size + 1):
-                            indices = order[batch_i*batch_size:(batch_i+1) * batch_size]
-                            this_y = dataset["y"][indices, :]
-                            tiled_index = np.tile(index, len(this_y)) 
-                            this_feed_dict = {
-                                self.keep_ph: 1.,
-                                self.base_input_ph: dataset["x"][indices, :],
-                                self.base_target_ph: this_y,
-                                self.task_index_ph: tiled_index
-                            }
-                            self.sess.run(self.base_emb_train, feed_dict=this_feed_dict)
 
-                        if epoch % save_every == 0:
-                            curr_loss = self.new_eval(new_task) # guess embedding 
-                            curr_output = "%i, %f\n" % (epoch, curr_loss) 
-                            fout.write(curr_output)
-                            print(curr_output)
-                            if curr_loss < early_stopping_thresh:
-                                print("Early stop new!")
-                                break
+            curr_losses = self.all_eval() # guess embedding 
+            curr_output = ("0, ") + (format_string % tuple(curr_losses))
+            fout.write(curr_output)
+            print(curr_output)
+
+            # now tune
+            learning_rate = new_init_learning_rate
+            for epoch in range(1, max_new_epochs):
+                order = np.random.permutation(self.num_tasks)
+                for task_i in order:
+                    task = self.all_tasks[task_i]
+                    if task in self.new_tasks:
+                        dataset =  self.new_datasets[task]
+                    else:
+                        dataset =  self.base_datasets[task]
+                    self.dataset_train_step(dataset, learning_rate)
+
+                if epoch % save_every == 0:
+                    curr_losses = self.all_eval()
+                    curr_output = ("%i, " % epoch) + (format_string % tuple(curr_losses))
+                    fout.write(curr_output)
+                    print(curr_output)
+                    if np.all(curr_losses < early_stopping_thresh):
+                        print("Early stop new!")
+                        break
+
+                if epoch % lr_decays_every == 0 and epoch > 0 and learning_rate > min_learning_rate:
+                    learning_rate *= lr_decay
+
+            for new_task in self.new_tasks:
+                
+                with open(filename_prefix + new_task + "_outputs.csv", "a") as foutputs:
                     curr_net_outputs = self.new_outputs(new_task)
-                    foutputs.write("trained_emb, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(curr_net_outputs) + "\n")
+                    foutputs.write("trained_emb, " + ', '.join(["%f" for i in range(len(curr_net_outputs))]) % tuple(curr_net_outputs) + "\n")
 
 
     def save_embeddings(self, filename):
@@ -475,18 +405,30 @@ class meta_model(object):
             split_t = t.split(';')
             return ';'.join([split_t[0], split_t[2]])
         with open(filename, "w") as fout:
-            simplified_tasks = [_simplify(t) for t in self.base_tasks + self.new_tasks]
+            simplified_tasks = [_simplify(t) for t in self.all_tasks]
             fout.write("dimension, " + ", ".join(simplified_tasks) + "\n")
             format_string = ", ".join(["%f" for _ in self.base_tasks + self.new_tasks]) + "\n"
-            task_embeddings = self.sess.run(self.function_embeddings) 
+            task_embeddings = np.zeros([self.num_tasks, num_hidden_hyper])
+
+            for task in self.all_tasks:
+                if task in self.new_tasks:
+                    dataset =  self.new_datasets[task]
+                else:
+                    dataset =  self.base_datasets[task]
+                task_i = self.task_to_index[task]
+                guess_dataset = self._guess_dataset(dataset)
+                task_embeddings[task_i, :] = self.sess.run(
+                    self.function_embedding,
+                    feed_dict={
+                        self.guess_input_ph: guess_dataset  
+                    }) 
+
             for i in range(num_hidden_hyper):
                 fout.write(("%i, " %i) + (format_string % tuple(task_embeddings[:, i])))
                 
-
-                
 ## running stuff
 
-for run_i in range(num_runs):
+for run_i in xrange(num_runs):
     np.random.seed(run_i)
     perm_list_dict = {task: (np.random.permutation(perm_list_template) if task not in ["XO", "NOTX0", "threeparity"] else np.random.permutation(single_perm_list_template)) for task in total_tasks} 
     tf.set_random_seed(run_i)
@@ -494,8 +436,9 @@ for run_i in range(num_runs):
     print("Now running %s" % filename_prefix)
 
     model = meta_model(num_input, base_tasks, base_task_repeats, new_tasks) 
+    model.save_embeddings(filename=output_dir + filename_prefix + "_init_embeddings.csv")
     model.train_base_tasks(filename=output_dir + filename_prefix + "_base_losses.csv")
-    model.train_meta_task(filename=output_dir + filename_prefix + "_meta_losses.csv")
+    model.save_embeddings(filename=output_dir + filename_prefix + "_guess_embeddings.csv")
     model.train_new_tasks(filename_prefix=output_dir + filename_prefix + "_new_")
     model.save_embeddings(filename=output_dir + filename_prefix + "_final_embeddings.csv")
 
