@@ -8,20 +8,21 @@ import datasets
 PI = np.pi
 ### Parameters
 num_input_per = 5
-num_hidden = 32
+num_hidden = 10
 num_runs = 10 
-learning_rate = 0.0005
+learning_rate = 0.005
 num_epochs = 20000
 num_layers = 4
-output_dir = "results_5/"
+output_dir = "results_narrow_small/"
 save_every = 20
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 train_sequentially = True # If true, train task 2 and then task 1
+second_train_both = False # If train_sequentially, whether to continue training on task 2 while training task 1
 batch_size = 4
 early_stopping_thresh = 0.005
 
 ###
-var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1., mode='FAN_AVG')
+var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=0.5, mode='FAN_AVG')
 if tf_pm:
     nonlinearity = tf.nn.tanh
 else:
@@ -170,7 +171,10 @@ for run_i in xrange(num_runs):
                                             print("Early stop prior!")
                                             break
                             for epoch_i in xrange(num_epochs+1, 2*num_epochs + 1):
-                                train_epoch() # train on both	
+                                if second_train_both: 
+                                    train_epoch() # train on both	
+                                else: 
+                                    train_epoch_1()
                                 if epoch_i % save_every == 0:
                                     loss1, loss2 = evaluate()
                                     print("%i, %f, %f\n" % (epoch_i, loss1, loss2))
