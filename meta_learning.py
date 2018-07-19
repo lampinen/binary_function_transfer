@@ -244,9 +244,14 @@ class meta_model(object):
             task_hidden = internal_nonlinearity(tf.matmul(task_hidden, self.hidden_weights[i]) + self.hidden_biases[i])
         self.output = output_nonlinearity(tf.matmul(task_hidden, Wfinal) + bfinal)
         
-        self.base_loss = tf.reduce_sum(tf.square(self.output - self.base_target_ph), axis=1)
+
+        self.base_is_masked = tf.placeholder_with_default(True, []) # whether to mask loss to just strict "output" units
+        self.base_loss = tf.cond(self.base_is_masked,
+            lambda: tf.reduce_sum(tf.square(self.output - self.base_target_ph)[:, -num_output:], axis=1),
+            lambda: tf.reduce_sum(tf.square(self.output - self.base_target_ph), axis=1))
         self.total_base_loss = tf.reduce_mean(self.base_loss)
-        base_full_optimizer = tf.train.MomentumOptimizer(self.lr_ph, train_momentum)
+        base_full_optimizer = tf.train.RMSPropOptimizer(self.lr_ph)
+        #base_full_optimizer = tf.train.MomentumOptimizer(self.lr_ph, train_momentum)
         self.base_full_train = base_full_optimizer.minimize(self.total_base_loss)
 
         # initialize
@@ -259,34 +264,37 @@ class meta_model(object):
                               axis=1)
 
     
-    def dataset_eval(self, dataset, zeros=False):
+    def dataset_eval(self, dataset, zeros=False, mask=True):
         guess_dataset = self._guess_dataset(dataset)
         this_feed_dict = {
             self.base_input_ph: dataset["x"],
             self.guess_input_ph: np.zeros_like(guess_dataset) if zeros else guess_dataset,
+            self.base_is_masked: mask,
             self.base_target_ph: dataset["y"]
         }
         loss = self.sess.run(self.total_base_loss, feed_dict=this_feed_dict)
         return loss
 
 
-    def dataset_embedding_eval(self, dataset, embedding, zeros=False):
+    def dataset_embedding_eval(self, dataset, embedding, zeros=False, mask=True):
         this_feed_dict = {
             self.embedding_is_fed: True,
             self.feed_embedding_ph: np.zeros_like(embedding) if zeros else embedding,
             self.base_input_ph: dataset["x"],
+            self.base_is_masked: mask,
             self.base_target_ph: dataset["y"]
         }
         loss = self.sess.run(self.total_base_loss, feed_dict=this_feed_dict)
         return loss
 
 
-    def dataset_train_step(self, dataset, lr):
+    def dataset_train_step(self, dataset, lr, mask=True):
         guess_subset = np.random.permutation(len(dataset["y"]))[:meta_batch_size]
         this_feed_dict = {
             self.base_input_ph: dataset["x"],
             self.guess_input_ph: self._guess_dataset(dataset)[guess_subset, :],
             self.base_target_ph: dataset["y"],
+            self.base_is_masked: mask,
             self.lr_ph: lr
         }
         loss = self.sess.run(self.base_full_train, feed_dict=this_feed_dict)
@@ -364,7 +372,7 @@ class meta_model(object):
 
         for task in self.base_meta_tasks:
             dataset = self.get_meta_dataset(task)
-            losses[self.task_to_index[task]] = self.dataset_eval(dataset)
+            losses[self.task_to_index[task]] = self.dataset_eval(dataset, mask=False)
 
         for task in self.new_tasks:
             dataset =  self.new_datasets[task]
@@ -402,6 +410,13 @@ class meta_model(object):
                     task = self.base_tasks[task_i]
                     dataset =  self.base_datasets[task]
                     self.dataset_train_step(dataset, learning_rate)
+
+                order = np.random.permutation(len(self.base_meta_tasks))
+                for task_i in order:
+                    task = self.base_meta_tasks[task_i]
+                    dataset =  self.get_meta_dataset(task)
+                    self.dataset_train_step(dataset, learning_rate, mask=False)
+
 
                 if epoch % save_every == 0:
                     curr_losses = self.base_eval()
@@ -453,13 +468,16 @@ class meta_model(object):
                     order = np.random.permutation(self.num_tasks)
                     for task_i in order:
                         task = self.all_tasks[task_i]
+                        mask=True
                         if task in self.new_tasks:
                             dataset =  self.new_datasets[task]
                         elif task in self.base_meta_tasks:
                             dataset = self.get_meta_dataset(task)
+                            mask=False
                         else:
                             dataset =  self.base_datasets[task]
-                        self.dataset_train_step(dataset, learning_rate)
+                        self.dataset_train_step(dataset, learning_rate, 
+                                                mask=mask)
 
                     if epoch % save_every == 0:
                         curr_meta_true_losses, _ = self.meta_true_eval() 
