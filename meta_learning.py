@@ -326,14 +326,20 @@ class meta_model(object):
         for meta_task in self.base_meta_tasks:
             if meta_task == "NOT":
                 for task in tasks:
-                    other = "NOT" + task if task[:3] != "NOT" else task[3:]
-                    if other in tasks:
+		    stripped_task = ";".join(task.split(";")[:-1])
+		    other = "NOT" + task if task[:3] != "NOT" else task[3:]
+		    other_tasks = [t for t in self.base_tasks if other in t]
+		    if other_tasks != []:
+			other = other_tasks[0]
                         if task in self.base_tasks:
                             task_embedding = self.get_task_embedding(self.base_datasets[task])
                         else: 
                             task_embedding = self.get_task_embedding(self.new_datasets[task])
 
-                        dataset = self.base_datasets[other]
+			if other in self.base_tasks:
+			    dataset = self.base_datasets[other]
+			else:
+			    dataset = self.new_datasets[other]
 
                         names.append("NOT:" + task + "->" + other)
                         losses.append(self.dataset_embedding_eval(dataset, task_embedding))
