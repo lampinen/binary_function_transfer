@@ -309,8 +309,8 @@ class meta_model(object):
         if meta_task == "NOT":
             for task in self.base_tasks: 
                 stripped_task = ";".join(task.split(";")[:-1])
-                other = "NOT" + task if task[:3] != "NOT" else task[3:]
-                other_tasks = [t for t in self.base_tasks if other in t]
+                other = "NOT" + stripped_task if task[:3] != "NOT" else stripped_task[3:]
+                other_tasks = [t for t in self.base_tasks if ";".join(t.split(";")[:-1]) == other]
                 if other_tasks != []:
                     other = other_tasks[0]
                     x_data.append(self.get_task_embedding(self.base_datasets[task])[0, :])
