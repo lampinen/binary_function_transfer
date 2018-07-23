@@ -15,9 +15,9 @@ num_output = 1
 num_hidden = 4
 num_hidden_hyper = 64
 num_runs = 20 
-init_learning_rate = 3e-5
+init_learning_rate = 5e-5
 new_init_learning_rate = 1e-6
-lr_decay = 0.8
+lr_decay = 0.75
 lr_decays_every = 200
 min_learning_rate = 1e-7
 
@@ -37,7 +37,7 @@ conv_in_channels = 6
 batch_size = 16
 meta_batch_size = 12 # how much of each dataset the function embedding guesser sees 
 early_stopping_thresh = 0.005
-base_tasks = ["X0", "NOTX0", "XOR", "X0NOTX1", "NOTX0NOTX1", "NOTXOR", "OR", "AND", "NOTAND"]
+base_tasks = ["X0", "NOTX0", "X0NOTX1", "NOTX0NOTX1", "OR", "AND", "NOTAND"]
 base_meta_tasks = ["NOT"]
 base_task_repeats = 5 # how many times each base task is seen
 new_tasks = ["X0", "AND", "OR", "NOTOR", "NOTAND", "XOR", "XOR_of_XORs"]
@@ -52,6 +52,7 @@ else:
 
 # TODO: update for general inputs
 perm_list_template = [(0, 1, 2, 3), (0, 2, 1, 3), (0, 2, 3, 1), (2, 0, 1, 3), (2, 0, 3, 1), (2, 3, 0, 1)]
+#perm_list_template = [(0, 1, 2, 3, 4), (0, 2, 1, 3, 4), (0, 2, 3, 1), (2, 0, 1, 3), (2, 0, 3, 1), (2, 3, 0, 1)]
 single_perm_list_template = [(0, 1, 2, 3), (1, 2, 3, 0), (2, 3, 0, 1), (3, 0, 1, 2), (0, 1, 2, 3), (1, 2, 3, 0), (2, 3, 0, 1), (3, 0, 1, 2)]
 total_tasks = set(base_tasks + new_tasks)
 perm_list_dict = {task: (np.random.permutation(perm_list_template) if task not in ["XO", "NOTX0", "threeparity"] else np.random.permutation(single_perm_list_template)) for task in total_tasks} 
@@ -280,6 +281,7 @@ class meta_model(object):
         this_feed_dict = {
             self.embedding_is_fed: True,
             self.feed_embedding_ph: np.zeros_like(embedding) if zeros else embedding,
+            self.guess_input_ph: np.zeros([1, 2*num_hidden_hyper]),
             self.base_input_ph: dataset["x"],
             self.base_is_masked: mask,
             self.base_target_ph: dataset["y"]
@@ -327,9 +329,10 @@ class meta_model(object):
             if meta_task == "NOT":
                 for task in tasks:
 		    stripped_task = ";".join(task.split(";")[:-1])
-		    other = "NOT" + task if task[:3] != "NOT" else task[3:]
-		    other_tasks = [t for t in self.base_tasks if other in t]
+		    other = "NOT" + stripped_task if task[:3] != "NOT" else stripped_task[3:]
+		    other_tasks = [t for t in tasks if ";".join(t.split(";")[:-1]) == other]
 		    if other_tasks != []:
+                        
 			other = other_tasks[0]
                         if task in self.base_tasks:
                             task_embedding = self.get_task_embedding(self.base_datasets[task])
@@ -357,7 +360,7 @@ class meta_model(object):
         offset = len(self.new_tasks) # new come before meta in indices
         for task in self.base_meta_tasks:
             dataset = self.get_meta_dataset(task)
-            losses[self.task_to_index[task] - offset] = self.dataset_eval(dataset)
+            losses[self.task_to_index[task] - offset] = self.dataset_eval(dataset, mask=False)
 
         return losses
 
