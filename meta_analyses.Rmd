@@ -14,7 +14,7 @@ theme_set(theme_bw() +
 ```
 
 ```{r}
-nruns = 10
+nruns = 1
 
 d = data.frame()
 for (run_i in 0:(nruns-1)) {
@@ -77,3 +77,83 @@ for (emb_type in c("guess", "final")) {
 }
 ```
 
+# meta-tasks
+
+```{r}
+meta_tasks = c("ID", "NOT")
+truly_new_tasks = c("NOTOR")
+```
+
+```{r}
+task_truly_new =  function(tasks) {
+  return(any(vapply(truly_new_tasks, function(x) grepl(x, tasks), T)))
+} 
+task_truly_new = Vectorize(task_truly_new)
+```
+
+```{r}
+meta_d = data.frame()
+for (run_i in 0:(nruns-1)) {
+  this_d = read.csv(sprintf("meta_results/run%i_new_meta_true_losses.csv", run_i), header=T)
+  this_d$run = run_i
+  this_d = this_d %>% 
+    gather(mapping, loss, -c(run, epoch)) %>%
+    mutate(is_new = grepl("new", mapping),
+           is_truly_new = task_truly_new(mapping),
+           condition = ifelse(is_truly_new, "completely_new",
+                       ifelse(is_new, "new_application",
+                              "old"))) %>%
+    separate(mapping, c("meta_task", "original_task", "relevant"), sep="\\.", extra="drop")
+
+  meta_d = bind_rows(meta_d, this_d)
+}
+```
+
+```{r}
+meta_bookend_summarized_d = meta_d %>%
+  group_by(run) %>%
+  filter(epoch == 0 | epoch == max(epoch)) %>%
+  ungroup() %>%
+  mutate(time=ifelse(epoch==0, "guess", "final")) %>%
+  select(-epoch) %>%
+  group_by(time, meta_task, condition) %>%
+  summarize(mean_loss = mean(loss),
+            se_loss = sd(loss)/sqrt(n())) %>%
+  ungroup() %>%
+  mutate(cihi=mean_loss + 1.96*se_loss, 
+         cilo=mean_loss - 1.96*se_loss)
+```
+
+```{r}
+ggplot(data=meta_bookend_summarized_d, aes(x=meta_task, fill=condition, y=mean_loss)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_errorbar(aes(ymin=cilo, ymax=cihi), position="dodge") +
+  scale_fill_brewer(palette="Set2") +
+  geom_hline(yintercept=1.0, alpha=0.5, linetype=2) +
+  facet_grid(~time)
+```
+
+```{r}
+meta_bookend_d = meta_d %>%
+  group_by(run) %>%
+  filter(epoch == 0 | epoch == max(epoch)) %>%
+  ungroup() %>%
+  mutate(time=ifelse(epoch==0, "guess", "final")) %>%
+  select(-epoch) %>%
+  group_by(time, meta_task, original_task, condition) %>%
+  summarize(mean_loss = mean(loss),
+            se_loss = sd(loss)/sqrt(n())) %>%
+  ungroup() %>%
+  mutate(cihi=mean_loss + 1.96*se_loss, 
+         cilo=mean_loss - 1.96*se_loss)
+```
+
+```{r}
+ggplot(data=meta_bookend_d %>% filter(time=="guess"), aes(x=original_task, fill=condition, y=mean_loss)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_errorbar(aes(ymin=cilo, ymax=cihi), position="dodge") +
+  scale_fill_brewer(palette="Set2") +
+  geom_hline(yintercept=1.0, alpha=0.5, linetype=2) +
+  facet_grid(~ meta_task) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
