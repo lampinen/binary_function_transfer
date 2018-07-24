@@ -10,16 +10,19 @@ import datasets
 
 pi = np.pi
 ### Parameters
-num_input = 4
+num_input = 6
 num_output = 1
-num_hidden = 64
-num_hidden_hyper = 64
+num_hidden = 32
+num_hidden_hyper = 32
 num_runs = 20 
-init_learning_rate = 1e-4
-new_init_learning_rate = 1e-7
+init_learning_rate = 3e-4
+init_meta_learning_rate = 3e-4
+new_init_learning_rate = 1e-6
+new_init_meta_learning_rate = 1e-6
 lr_decay = 0.8
-lr_decays_every = 100
-min_learning_rate = 1e-6
+meta_lr_decay = 0.8
+lr_decays_every = 200
+min_learning_rate = 5e-7
 refresh_meta_cache_every = 1#200 # how many epochs between updates to meta_dataset_cache
 
 train_momentum = 0.8
@@ -35,13 +38,13 @@ tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 hyper_convolutional = False # whether hyper network creates weights convolutionally
 conv_in_channels = 6
 
-batch_size = 16
-meta_batch_size = 12 # how much of each dataset the function embedding guesser sees 
+batch_size = 64
+meta_batch_size = 48 # how much of each dataset the function embedding guesser sees 
 early_stopping_thresh = 0.005
 base_tasks = ["X0", "NOTX0", "X0NOTX1", "NOTX0NOTX1", "OR", "AND", "NOTAND"]
 base_meta_tasks = ["ID", "NOT"]
-base_task_repeats = 5 # how many times each base task is seen
-new_tasks = ["X0", "AND", "OR", "NOTOR", "NOTAND", "XOR", "XOR_of_XORs"]
+base_task_repeats = 14 # how many times each base task is seen
+new_tasks = ["X0", "AND", "OR",  "X0NOTX1", "NOTX0NOTX1","NOTOR", "NOTAND"]
 ###
 var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1., mode='FAN_AVG')
 
@@ -52,11 +55,38 @@ else:
     output_nonlinearity = tf.nn.sigmoid 
 
 # TODO: update for general inputs
-perm_list_template = [(0, 1, 2, 3), (0, 2, 1, 3), (0, 2, 3, 1), (2, 0, 1, 3), (2, 0, 3, 1), (2, 3, 0, 1)]
-#perm_list_template = [(0, 1, 2, 3, 4), (0, 2, 1, 3, 4), (0, 2, 3, 1, 4), (2, 0, 1, 3, 4), (2, 0, 3, 1, 4), (2, 3, 0, 1, 4)]
-single_perm_list_template = [(0, 1, 2, 3), (1, 2, 3, 0), (2, 3, 0, 1), (3, 0, 1, 2), (0, 1, 2, 3), (1, 2, 3, 0), (2, 3, 0, 1), (3, 0, 1, 2)]
+def _get_perm_list_template(num_input):
+    template = []
+    for i in range(num_input):
+        for j in range(i+1, num_input):
+            this_perm = list(range(num_input)) 
+            this_perm[j] = 1
+            this_perm[1] = j
+            temp = this_perm[i]
+            this_perm[i] = 0
+            this_perm[0] = temp 
+            template.append(this_perm)
+    return template
+
+
+def _get_single_perm_list_template(num_input):
+    template = []
+    for offset in range(1, num_input):
+        for i in range(num_input):
+            j = i + offset
+            if j >= num_input:
+                break
+            this_perm = list(range(num_input)) 
+            this_perm[j] = 1
+            this_perm[1] = j
+            temp = this_perm[i]
+            this_perm[i] = 0
+            this_perm[0] = temp 
+            template.append(this_perm)
+    return template
+
 total_tasks = set(base_tasks + new_tasks)
-perm_list_dict = {task: (np.random.permutation(perm_list_template) if task not in ["XO", "NOTX0", "threeparity"] else np.random.permutation(single_perm_list_template)) for task in total_tasks} 
+perm_list_dict = {task: (np.random.permutation(_get_perm_list_template(num_input)) if task not in ["XO", "NOTX0"] else np.random.permutation(_get_single_perm_list_template(num_input))) for task in total_tasks} 
 
 def _get_perm(task):
     perm = np.copy(perm_list_dict[task][0, :])
@@ -329,7 +359,6 @@ class meta_model(object):
 
 
     def meta_true_eval(self):
-        # BROKEN
         """Evaluates true meta loss, i.e. the accuracy of the model produced
            by the embedding output by the meta task"""
         losses = []
@@ -415,13 +444,13 @@ class meta_model(object):
             dataset =  self.base_datasets[task]
             losses[self.task_to_index[task]] = self.dataset_eval(dataset)
 
-        for task in self.base_meta_tasks:
-            dataset = self.meta_dataset_cache[task]
-            losses[self.task_to_index[task]] = self.dataset_eval(dataset, mask=False)
-
         for task in self.new_tasks:
             dataset =  self.new_datasets[task]
             losses[self.task_to_index[task]] = self.dataset_eval(dataset)
+
+        for task in self.base_meta_tasks:
+            dataset = self.meta_dataset_cache[task]
+            losses[self.task_to_index[task]] = self.dataset_eval(dataset, mask=False)
 
         return losses
 
@@ -461,6 +490,7 @@ class meta_model(object):
             format_string = ", ".join(["%f" for _ in self.base_tasks + self.base_meta_tasks]) + "\n"
 
             learning_rate = init_learning_rate
+            meta_learning_rate = init_meta_learning_rate
 
             for epoch in range(max_base_epochs):
 
@@ -478,7 +508,7 @@ class meta_model(object):
                 for task_i in order:
                     task = self.base_meta_tasks[task_i]
                     dataset =  self.meta_dataset_cache[task]
-                    self.dataset_train_step(dataset, learning_rate, mask=False)
+                    self.dataset_train_step(dataset, meta_learning_rate, mask=False)
 
 
                 if epoch % save_every == 0:
@@ -493,13 +523,16 @@ class meta_model(object):
                 if epoch % lr_decays_every == 0 and epoch > 0 and learning_rate > min_learning_rate:
                     learning_rate *= lr_decay
 
+                if epoch % lr_decays_every == 0 and epoch > 0 and meta_learning_rate > min_learning_rate:
+                    meta_learning_rate *= meta_lr_decay
+
 
     def train_new_tasks(self, filename_prefix):
         print("Now training new tasks...")
 
         with open(filename_prefix + "new_losses.csv", "w") as fout:
             with open(filename_prefix + "meta_true_losses.csv", "w") as fout_meta:
-                fout.write("epoch, " + ", ".join(self.base_tasks + self.new_tasks) + "\n")
+                fout.write("epoch, " + ", ".join(self.all_tasks) + "\n")
                 format_string = ", ".join(["%f" for _ in self.all_tasks]) + "\n"
 
                 for new_task in self.new_tasks:
@@ -530,6 +563,7 @@ class meta_model(object):
 
                 # now tune
                 learning_rate = new_init_learning_rate
+                meta_learning_rate = new_init_meta_learning_rate
                 for epoch in range(1, max_new_epochs):
                     if epoch % refresh_meta_cache_every == 0:
                         for task in self.base_meta_tasks:
@@ -539,11 +573,13 @@ class meta_model(object):
                     for task_i in order:
                         task = self.all_tasks[task_i]
                         mask=True
+                        this_lr = learning_rate
                         if task in self.new_tasks:
                             dataset =  self.new_datasets[task]
                         elif task in self.base_meta_tasks:
                             dataset = self.meta_dataset_cache[task]
                             mask=False
+                            this_lr = meta_learning_rate
                         else:
                             dataset =  self.base_datasets[task]
                         self.dataset_train_step(dataset, learning_rate, 
@@ -564,6 +600,9 @@ class meta_model(object):
 
                     if epoch % lr_decays_every == 0 and epoch > 0 and learning_rate > min_learning_rate:
                         learning_rate *= lr_decay
+
+                    if epoch % lr_decays_every == 0 and epoch > 0 and meta_learning_rate > min_learning_rate:
+                        meta_learning_rate *= meta_lr_decay
 
         for new_task in self.new_tasks:
             
@@ -609,7 +648,7 @@ class meta_model(object):
 
 for run_i in xrange(num_runs):
     np.random.seed(run_i)
-    perm_list_dict = {task: (np.random.permutation(perm_list_template) if task not in ["XO", "NOTX0", "threeparity"] else np.random.permutation(single_perm_list_template)) for task in total_tasks} 
+    perm_list_dict = {task: (np.random.permutation(_get_perm_list_template(num_input)) if task not in ["XO", "NOTX0"] else np.random.permutation(_get_single_perm_list_template(num_input))) for task in total_tasks} 
     tf.set_random_seed(run_i)
     filename_prefix = "run%i" %(run_i)
     print("Now running %s" % filename_prefix)
