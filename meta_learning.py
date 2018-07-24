@@ -329,6 +329,7 @@ class meta_model(object):
 
 
     def meta_true_eval(self):
+        # BROKEN
         """Evaluates true meta loss, i.e. the accuracy of the model produced
            by the embedding output by the meta task"""
         losses = []
