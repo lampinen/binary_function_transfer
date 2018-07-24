@@ -8,23 +8,24 @@ import tensorflow.contrib.slim as slim
 #from scipy.spatial.distance import pdist
 import datasets
 
-i = np.pi
+pi = np.pi
 ### Parameters
 num_input = 4
 num_output = 1
-num_hidden = 4
+num_hidden = 64
 num_hidden_hyper = 64
 num_runs = 20 
-init_learning_rate = 5e-5
-new_init_learning_rate = 1e-6
-lr_decay = 0.75
-lr_decays_every = 200
-min_learning_rate = 1e-7
+init_learning_rate = 1e-4
+new_init_learning_rate = 1e-7
+lr_decay = 0.8
+lr_decays_every = 100
+min_learning_rate = 1e-6
+refresh_meta_cache_every = 1#200 # how many epochs between updates to meta_dataset_cache
 
 train_momentum = 0.8
 adam_epsilon = 1e-3
 
-max_base_epochs = 10000 
+max_base_epochs = 5000 
 max_new_epochs = 1000 
 num_task_hidden_layers = 3
 num_meta_hidden_layers = 3
@@ -38,7 +39,7 @@ batch_size = 16
 meta_batch_size = 12 # how much of each dataset the function embedding guesser sees 
 early_stopping_thresh = 0.005
 base_tasks = ["X0", "NOTX0", "X0NOTX1", "NOTX0NOTX1", "OR", "AND", "NOTAND"]
-base_meta_tasks = ["NOT"]
+base_meta_tasks = ["ID", "NOT"]
 base_task_repeats = 5 # how many times each base task is seen
 new_tasks = ["X0", "AND", "OR", "NOTOR", "NOTAND", "XOR", "XOR_of_XORs"]
 ###
@@ -52,7 +53,7 @@ else:
 
 # TODO: update for general inputs
 perm_list_template = [(0, 1, 2, 3), (0, 2, 1, 3), (0, 2, 3, 1), (2, 0, 1, 3), (2, 0, 3, 1), (2, 3, 0, 1)]
-#perm_list_template = [(0, 1, 2, 3, 4), (0, 2, 1, 3, 4), (0, 2, 3, 1), (2, 0, 1, 3), (2, 0, 3, 1), (2, 3, 0, 1)]
+#perm_list_template = [(0, 1, 2, 3, 4), (0, 2, 1, 3, 4), (0, 2, 3, 1, 4), (2, 0, 1, 3, 4), (2, 0, 3, 1, 4), (2, 3, 0, 1, 4)]
 single_perm_list_template = [(0, 1, 2, 3), (1, 2, 3, 0), (2, 3, 0, 1), (3, 0, 1, 2), (0, 1, 2, 3), (1, 2, 3, 0), (2, 3, 0, 1), (3, 0, 1, 2)]
 total_tasks = set(base_tasks + new_tasks)
 perm_list_dict = {task: (np.random.permutation(perm_list_template) if task not in ["XO", "NOTX0", "threeparity"] else np.random.permutation(single_perm_list_template)) for task in total_tasks} 
@@ -123,6 +124,9 @@ class meta_model(object):
             self.base_tasks.append(task_full_name) 
 
         self.base_meta_tasks = base_meta_tasks 
+        self.meta_dataset_cache = {t: {} for t in base_meta_tasks} # will cache datasets for a certain number of epochs
+                                                                   # both to speed training and to keep training targets
+                                                                   # consistent
 
         # new datasets
         self.new_tasks = []
@@ -251,8 +255,8 @@ class meta_model(object):
             lambda: tf.reduce_sum(tf.square(self.output - self.base_target_ph)[:, -num_output:], axis=1),
             lambda: tf.reduce_sum(tf.square(self.output - self.base_target_ph), axis=1))
         self.total_base_loss = tf.reduce_mean(self.base_loss)
-        base_full_optimizer = tf.train.RMSPropOptimizer(self.lr_ph)
         #base_full_optimizer = tf.train.MomentumOptimizer(self.lr_ph, train_momentum)
+        base_full_optimizer = tf.train.RMSPropOptimizer(self.lr_ph)
         self.base_full_train = base_full_optimizer.minimize(self.total_base_loss)
 
         # initialize
@@ -315,6 +319,11 @@ class meta_model(object):
                     other = other_tasks[0]
                     x_data.append(self.get_task_embedding(self.base_datasets[task])[0, :])
                     y_data.append(self.get_task_embedding(self.base_datasets[other])[0, :])
+        elif meta_task == "ID":
+            for task in self.base_tasks: 
+                embedding = self.get_task_embedding(self.base_datasets[task])[0, :]
+                x_data.append(embedding)
+                y_data.append(embedding)
 
         return {"x": np.array(x_data), "y": np.array(y_data)}
 
@@ -326,26 +335,52 @@ class meta_model(object):
         names = []
         tasks = self.base_tasks + self.new_tasks
         for meta_task in self.base_meta_tasks:
+            meta_dataset = self.get_meta_dataset(meta_task)
             if meta_task == "NOT":
                 for task in tasks:
 		    stripped_task = ";".join(task.split(";")[:-1])
 		    other = "NOT" + stripped_task if task[:3] != "NOT" else stripped_task[3:]
 		    other_tasks = [t for t in tasks if ";".join(t.split(";")[:-1]) == other]
 		    if other_tasks != []:
-                        
 			other = other_tasks[0]
+                       
                         if task in self.base_tasks:
-                            task_embedding = self.get_task_embedding(self.base_datasets[task])
+                            task_dataset = self.base_datasets[task]
                         else: 
-                            task_embedding = self.get_task_embedding(self.new_datasets[task])
+                            task_dataset = self.new_datasets[task]
+
+                        task_embedding = self.get_task_embedding(task_dataset)
 
 			if other in self.base_tasks:
 			    dataset = self.base_datasets[other]
 			else:
 			    dataset = self.new_datasets[other]
 
+                        mapped_embedding = self.get_outputs(meta_dataset,
+                                                            {"x": task_embedding},
+                                                            full=True)
+
                         names.append("NOT:" + task + "->" + other)
-                        losses.append(self.dataset_embedding_eval(dataset, task_embedding))
+                        losses.append(self.dataset_embedding_eval(dataset, mapped_embedding))
+
+            elif meta_task == "ID":
+                for task in tasks:
+                    if task in self.base_tasks:
+                        dataset = self.base_datasets[task]
+                    else: 
+                        dataset = self.new_datasets[task]
+
+                    task_embedding = self.get_task_embedding(dataset)
+
+                    mapped_embedding = self.get_outputs(meta_dataset,
+                                                        {"x": task_embedding},
+                                                        full=True)
+
+                    names.append("ID:" + task + "->" + task)
+                    losses.append(self.dataset_embedding_eval(dataset, mapped_embedding))
+
+            else:
+                raise ValueError("Unrecognized meta task")
 
         return losses, names
 
@@ -359,7 +394,7 @@ class meta_model(object):
 
         offset = len(self.new_tasks) # new come before meta in indices
         for task in self.base_meta_tasks:
-            dataset = self.get_meta_dataset(task)
+            dataset = self.meta_dataset_cache[task]
             losses[self.task_to_index[task] - offset] = self.dataset_eval(dataset, mask=False)
 
         return losses
@@ -380,7 +415,7 @@ class meta_model(object):
             losses[self.task_to_index[task]] = self.dataset_eval(dataset)
 
         for task in self.base_meta_tasks:
-            dataset = self.get_meta_dataset(task)
+            dataset = self.meta_dataset_cache[task]
             losses[self.task_to_index[task]] = self.dataset_eval(dataset, mask=False)
 
         for task in self.new_tasks:
@@ -388,6 +423,19 @@ class meta_model(object):
             losses[self.task_to_index[task]] = self.dataset_eval(dataset)
 
         return losses
+
+    def get_outputs(self, dataset, new_dataset=None, full=False):
+        if new_dataset is None:
+            new_dataset = guess_dataset
+        this_feed_dict = {
+            self.base_input_ph: new_dataset["x"],
+            self.guess_input_ph: self._guess_dataset(dataset) 
+        }
+        outputs = self.sess.run(self.output, feed_dict=this_feed_dict)
+        if full:
+            return outputs
+        else:
+            return outputs[:, -1]
 
 
     def new_outputs(self, new_task, zeros=False):
@@ -414,6 +462,11 @@ class meta_model(object):
             learning_rate = init_learning_rate
 
             for epoch in range(max_base_epochs):
+
+                if epoch % refresh_meta_cache_every == 0:
+                    for task in self.base_meta_tasks:
+                        self.meta_dataset_cache[task] = self.get_meta_dataset(task)
+
                 order = np.random.permutation(len(self.base_tasks))
                 for task_i in order:
                     task = self.base_tasks[task_i]
@@ -423,7 +476,7 @@ class meta_model(object):
                 order = np.random.permutation(len(self.base_meta_tasks))
                 for task_i in order:
                     task = self.base_meta_tasks[task_i]
-                    dataset =  self.get_meta_dataset(task)
+                    dataset =  self.meta_dataset_cache[task]
                     self.dataset_train_step(dataset, learning_rate, mask=False)
 
 
@@ -459,6 +512,9 @@ class meta_model(object):
                         curr_net_outputs = self.new_outputs(new_task, zeros=False)
                         foutputs.write("guess_emb, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(curr_net_outputs) + "\n")
 
+                for task in self.base_meta_tasks:
+                    self.meta_dataset_cache[task] = self.get_meta_dataset(task)
+
                 curr_meta_true_losses, meta_true_names = self.meta_true_eval() 
                 fout_meta.write("epoch, " + ", ".join(meta_true_names) + "\n")
                 meta_format_string = ", ".join(["%f" for _ in meta_true_names]) + "\n"
@@ -474,6 +530,10 @@ class meta_model(object):
                 # now tune
                 learning_rate = new_init_learning_rate
                 for epoch in range(1, max_new_epochs):
+                    if epoch % refresh_meta_cache_every == 0:
+                        for task in self.base_meta_tasks:
+                            self.meta_dataset_cache[task] = self.get_meta_dataset(task)
+
                     order = np.random.permutation(self.num_tasks)
                     for task_i in order:
                         task = self.all_tasks[task_i]
@@ -481,7 +541,7 @@ class meta_model(object):
                         if task in self.new_tasks:
                             dataset =  self.new_datasets[task]
                         elif task in self.base_meta_tasks:
-                            dataset = self.get_meta_dataset(task)
+                            dataset = self.meta_dataset_cache[task]
                             mask=False
                         else:
                             dataset =  self.base_datasets[task]
