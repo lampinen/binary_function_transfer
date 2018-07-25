@@ -41,10 +41,10 @@ conv_in_channels = 6
 batch_size = 64
 meta_batch_size = 48 # how much of each dataset the function embedding guesser sees 
 early_stopping_thresh = 0.005
-base_tasks = ["X0", "NOTX0", "X0NOTX1", "NOTX0NOTX1", "OR", "AND", "NOTAND"]
+base_tasks = ["X0", "NOTX0", "X0NOTX1", "NOTX0NOTX1", "OR", "AND", "NOTAND", "XOR"]
 base_meta_tasks = ["ID", "NOT"]
 base_task_repeats = 14 # how many times each base task is seen
-new_tasks = ["X0", "AND", "OR",  "X0NOTX1", "NOTX0NOTX1","NOTOR", "NOTAND"]
+new_tasks = ["X0", "AND", "OR",  "X0NOTX1", "NOTX0NOTX1","NOTOR", "NOTAND", "XOR", "NOTXOR"]
 ###
 var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1., mode='FAN_AVG')
 
@@ -622,25 +622,35 @@ class meta_model(object):
             }) 
 
 
-    def save_embeddings(self, filename):
-        """Saves all task embeddings"""
+    def save_embeddings(self, filename, meta_task=None):
+        """Saves all task embeddings, if meta_task is not None first computes
+           meta_task mapping on them."""
         def _simplify(t):
             split_t = t.split(';')
             return ';'.join([split_t[0], split_t[2]])
         with open(filename, "w") as fout:
             basic_tasks = self.base_tasks + self.new_tasks
             simplified_tasks = [_simplify(t) for t in basic_tasks]
-            fout.write("dimension, " + ", ".join(simplified_tasks) + "\n")
-            format_string = ", ".join(["%f" for _ in basic_tasks]) + "\n"
-            task_embeddings = np.zeros([len(basic_tasks), num_hidden_hyper])
+            fout.write("dimension, " + ", ".join(simplified_tasks + self.base_meta_tasks) + "\n")
+            format_string = ", ".join(["%f" for _ in self.all_tasks]) + "\n"
+            task_embeddings = np.zeros([len(self.all_tasks), num_hidden_hyper])
 
-            for task in basic_tasks:
+            for task in self.all_tasks:
                 if task in self.new_tasks:
                     dataset =  self.new_datasets[task]
-                else:
+                elif task in self.base_tasks:
                     dataset =  self.base_datasets[task]
+                else:
+                    dataset = self.get_meta_dataset(task)
                 task_i = self.task_to_index[task] 
                 task_embeddings[task_i, :] = self.get_task_embedding(dataset)
+
+            if meta_task is not None:
+		meta_dataset = self.get_meta_dataset(meta_task)
+		task_embeddings = self.get_outputs(meta_dataset,
+						   {"x": task_embeddings},
+						   full=True)
+
             for i in range(num_hidden_hyper):
                 fout.write(("%i, " %i) + (format_string % tuple(task_embeddings[:, i])))
                 
@@ -657,8 +667,15 @@ for run_i in xrange(num_runs):
     model.save_embeddings(filename=output_dir + filename_prefix + "_init_embeddings.csv")
     model.train_base_tasks(filename=output_dir + filename_prefix + "_base_losses.csv")
     model.save_embeddings(filename=output_dir + filename_prefix + "_guess_embeddings.csv")
+    for meta_task in base_meta_tasks:
+        model.save_embeddings(filename=output_dir + filename_prefix + "_" + meta_task + "_guess_embeddings.csv",
+                              meta_task=meta_task)
+
     model.train_new_tasks(filename_prefix=output_dir + filename_prefix + "_new_")
     model.save_embeddings(filename=output_dir + filename_prefix + "_final_embeddings.csv")
+    for meta_task in base_meta_tasks:
+        model.save_embeddings(filename=output_dir + filename_prefix + "_" + meta_task + "_final_embeddings.csv",
+                              meta_task=meta_task)
 
 
     tf.reset_default_graph()
