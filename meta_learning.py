@@ -41,10 +41,10 @@ conv_in_channels = 6
 batch_size = 64
 meta_batch_size = 48 # how much of each dataset the function embedding guesser sees 
 early_stopping_thresh = 0.005
-base_tasks = ["X0", "NOTX0", "X0NOTX1", "NOTX0NOTX1", "OR", "AND", "NOTAND", "XOR"]
+base_tasks = ["X0", "NOTX0", "X0NOTX1", "NOTX0NOTX1", "OR", "AND", "NOTAND"]
 base_meta_tasks = ["ID", "NOT"]
 base_task_repeats = 14 # how many times each base task is seen
-new_tasks = ["X0", "AND", "OR",  "X0NOTX1", "NOTX0NOTX1","NOTOR", "NOTAND", "XOR", "NOTXOR"]
+new_tasks = ["X0", "AND", "OR",  "X0NOTX1", "NOTX0NOTX1","NOTOR", "NOTAND", "XOR"]
 ###
 var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1., mode='FAN_AVG')
 

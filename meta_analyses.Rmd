@@ -14,8 +14,12 @@ theme_set(theme_bw() +
 ```
 
 ```{r}
-nruns = 1
+meta_tasks = c("ID", "NOT")
+truly_new_tasks = c("NOTOR", "NOTXOR")
+nruns = 5
+```
 
+```{r}
 d = data.frame()
 for (run_i in 0:(nruns-1)) {
   this_d = read.csv(sprintf("meta_results/run%i_new_new_losses.csv", run_i), header=T)
@@ -67,22 +71,54 @@ for (emb_type in c("guess", "final")) {
     this_d$run = run_i
     emb_d = bind_rows(emb_d, this_d)
   }
-  pcs = prcomp(emb_d %>% select(-dimension, -run), center=T, scale=T)
+  pcs = prcomp(emb_d %>% select(-dimension, -run, -one_of(meta_tasks)), center=T, scale=T)
   pc_d = data.frame(pcs$rotation)
   pc_d$task = row.names(pc_d)
   ggplot(pc_d, aes(x=PC1, y=PC2, color=task)) +
     geom_point() +
     geom_text(aes(label=task)) 
-  ggsave(sprintf("plots/meta/PCA_%s.png", emb_type), width=10, height=7)
+  ggsave(sprintf("plots/meta/PCA_%s.png", emb_type), width=15, height=7)
 }
+```
+
+```{r}
+emb_type = "guess"
+emb_d = data.frame()
+for (meta_task in c("None", meta_tasks)) {
+  for (run_i in 0:(nruns-1)) {
+    if (meta_task == "None") {
+      this_d = read.csv(sprintf("meta_results/run%i_%s_embeddings.csv", run_i, emb_type), header=T)
+    } else {
+      this_d = read.csv(sprintf("meta_results/run%i_%s_%s_embeddings.csv", run_i, meta_task, emb_type), header=T)
+    }
+    this_d$run = run_i
+    this_d$meta_task = meta_task
+    emb_d = bind_rows(emb_d, this_d)
+  }
+}
+```
+
+```{r}
+emb_matrix = emb_d %>%
+  filter(run == 0) %>% 
+  select(-run) %>%
+  gather(task, value, -c(dimension, meta_task)) %>%
+  unite(meta_and_task, meta_task, task) %>%
+  spread(meta_and_task, value) %>%
+  select(-dimension) %>%
+  as.matrix(.) %>%
+  t(.) %>%
+  dist(.) %>% 
+  as.matrix(.)
+
+```
+
+```{r}
+emb_matrix["NOT_NOT",]
 ```
 
 # meta-tasks
 
-```{r}
-meta_tasks = c("ID", "NOT")
-truly_new_tasks = c("NOTOR")
-```
 
 ```{r}
 task_truly_new =  function(tasks) {
