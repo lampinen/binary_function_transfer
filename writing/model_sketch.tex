@@ -43,7 +43,13 @@
 
 % meta
 
-\node [draw, thick, dashed, align=center] at (0, -2) (collection) {\(\{(\text{in}_0, \text{out}_0), ... \}\)};
+\node [draw, thick, dashed, align=center] at (0, -2) (collection) {
+\(\left\{
+\begin{matrix}
+(\text{in}_0, \text{out}_0),\\
+(\text{in}_1, \text{out}_1),\\
+...  
+\end{matrix}\right\}\)};
 \path [draw, very thick] (rep.south) to (collection);
 \path [draw, very thick] ([xshift=-1em]rep.south) to (collection);
 \path [draw, very thick] ([xshift=1em]rep.south) to (collection);
