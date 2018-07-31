@@ -15,14 +15,14 @@ theme_set(theme_bw() +
 
 ```{r}
 meta_tasks = c("ID", "NOT")
-truly_new_tasks = c("NOTOR", "NOTXOR")
+truly_new_tasks = c("NOTOR", "XOR", "NOTXOR")
 nruns = 5
 ```
 
 ```{r}
 d = data.frame()
 for (run_i in 0:(nruns-1)) {
-  this_d = read.csv(sprintf("meta_results/run%i_new_new_losses.csv", run_i), header=T)
+  this_d = read.csv(sprintf("meta_results_6/run%i_new_new_losses.csv", run_i), header=T)
   this_d$run = run_i
   this_d = this_d %>% 
     select(run, epoch, contains("new")) %>%
@@ -34,13 +34,26 @@ for (run_i in 0:(nruns-1)) {
 ```
 
 ```{r}
+task_truly_new =  function(tasks) {
+  return(any(vapply(truly_new_tasks, function(x) grepl(x, tasks), T)))
+} 
+task_truly_new = Vectorize(task_truly_new)
+```
+
+```{r}
+d = d %>%
+  mutate(condition = ifelse(task_truly_new(new_task), "Completely new", "New application"))
+```
+
+
+```{r}
 guess_summarized_d = d %>%
-  group_by(new_task, run) %>%
+  group_by(new_task, condition, run) %>%
   summarize(guess = head(loss, 1),
             trained = tail(loss, 1)) %>%
   ungroup() %>%
   gather(type, loss, guess, trained) %>%
-  group_by(new_task, type) %>%
+  group_by(new_task, condition, type) %>%
   summarize(loss_sd = sd(loss),
             loss = mean(loss),
             loss_ci_lo = loss - 1.96 * loss_sd/sqrt(n()),
@@ -51,16 +64,25 @@ guess_summarized_d = d %>%
 ```
 
 ```{r}
-ggplot(data=guess_summarized_d, aes(x=new_task, y=loss, fill=type)) +
+ggplot(data=guess_summarized_d %>% filter(!(new_task %in% c("XOR", "X0")), type == "guess"), aes(x=new_task, y=loss, fill=condition)) +
   geom_bar(stat="identity", position="dodge") + 
-  geom_errorbar(aes(ymin=loss_ci_lo, ymax=loss_ci_hi), position="dodge") +
+  geom_errorbar(aes(ymin=loss_ci_lo, ymax=loss_ci_hi), position="dodge", width=0.5) +
   scale_fill_brewer(palette="Dark2") +
   geom_hline(yintercept=1.0, alpha=0.5, linetype=2)
 ```
 ```{r}
 ggsave("plots/meta/meta_res.png")
 ```
-
+```{r}
+ggplot(data=guess_summarized_d %>% filter(!(new_task %in% c("XOR", "X0")), type == "trained"), aes(x=new_task, y=loss, fill=condition)) +
+  geom_bar(stat="identity", position="dodge") + 
+  geom_errorbar(aes(ymin=loss_ci_lo, ymax=loss_ci_hi), position="dodge", width=0.5) +
+  scale_fill_brewer(palette="Dark2") +
+  geom_hline(yintercept=1.0, alpha=0.5, linetype=2)
+```
+```{r}
+ggsave("plots/meta/meta_res_final.png")
+```
 # embeddings
 
 ```{r}
@@ -121,13 +143,6 @@ emb_matrix["NOT_NOT",]
 
 
 ```{r}
-task_truly_new =  function(tasks) {
-  return(any(vapply(truly_new_tasks, function(x) grepl(x, tasks), T)))
-} 
-task_truly_new = Vectorize(task_truly_new)
-```
-
-```{r}
 meta_d = data.frame()
 for (run_i in 0:(nruns-1)) {
   this_d = read.csv(sprintf("meta_results/run%i_new_meta_true_losses.csv", run_i), header=T)
@@ -147,6 +162,7 @@ for (run_i in 0:(nruns-1)) {
 
 ```{r}
 meta_bookend_summarized_d = meta_d %>%
+#  filter(original_task != "XOR") %>%
   group_by(run) %>%
   filter(epoch == 0 | epoch == max(epoch)) %>%
   ungroup() %>%
@@ -161,12 +177,15 @@ meta_bookend_summarized_d = meta_d %>%
 ```
 
 ```{r}
-ggplot(data=meta_bookend_summarized_d, aes(x=meta_task, fill=condition, y=mean_loss)) +
+ggplot(data=meta_bookend_summarized_d %>% filter(time=="guess"), aes(x=meta_task, fill=condition, y=mean_loss)) +
   geom_bar(stat="identity", position="dodge") +
   geom_errorbar(aes(ymin=cilo, ymax=cihi), position="dodge") +
   scale_fill_brewer(palette="Set2") +
-  geom_hline(yintercept=1.0, alpha=0.5, linetype=2) +
-  facet_grid(~time)
+  geom_hline(yintercept=1.0, alpha=0.5, linetype=2) 
+```
+
+```{r}
+ggsave("plots/meta/meta_guess_performance_summarized.png")
 ```
 
 ```{r}
@@ -193,3 +212,9 @@ ggplot(data=meta_bookend_d %>% filter(time=="guess"), aes(x=original_task, fill=
   facet_grid(~ meta_task) + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
+
+```{r}
+
+ggsave("plots/meta/meta_guess_performance.png")
+```
+
