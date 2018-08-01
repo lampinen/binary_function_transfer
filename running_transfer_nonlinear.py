@@ -8,12 +8,12 @@ import datasets
 PI = np.pi
 ### Parameters
 num_input_per = 5
-num_hidden = 10
+num_hidden = 40
 num_runs = 10 
 learning_rate = 0.005
 num_epochs = 20000
 num_layers = 4
-output_dir = "results_narrow_small/"
+output_dir = "results_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
 save_every = 20
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 train_sequentially = True # If true, train task 2 and then task 1
@@ -22,17 +22,17 @@ batch_size = 4
 early_stopping_thresh = 0.005
 
 ###
-var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=0.5, mode='FAN_AVG')
+var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1., mode='FAN_AVG')
 if tf_pm:
     nonlinearity = tf.nn.tanh
 else:
     nonlinearity = tf.nn.sigmoid 
 
 
-for run_i in xrange(num_runs):
-    for input_shared in [False, True]:
-        for t1 in ["parity", "XOR_of_XORs", "XOR", "AND"]:
-            for t2 in [ "X0", "XOR", "XOR_of_XORs", "parity", "OR", "AND", "None"]:
+for input_shared in [False]:#, True]:
+    for run_i in xrange(num_runs):
+        for t1 in ["XOR_of_XORs", "XOR", "AND"]:
+            for t2 in [ "X0", "XOR", "XOR_of_XORs", "OR", "AND", "None"]:
                 np.random.seed(run_i)
                 tf.set_random_seed(run_i)
                 filename_prefix = "t1%s_t2%s_sharedinput%s_run%i" %(t1, t2, str(input_shared), run_i)
