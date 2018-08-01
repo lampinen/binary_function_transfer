@@ -5,6 +5,7 @@ from __future__ import division
 import numpy as np
 import tensorflow as tf
 import datasets
+import os
 PI = np.pi
 ### Parameters
 num_input_per = 5
@@ -13,6 +14,7 @@ num_runs = 10
 learning_rate = 0.005
 num_epochs = 20000
 num_layers = 4
+init_mult = 1.
 output_dir = "results_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
 save_every = 20
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
@@ -22,7 +24,10 @@ batch_size = 4
 early_stopping_thresh = 0.005
 
 ###
-var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1., mode='FAN_AVG')
+if not os.path.exists(os.path.dirname(output_dir)):
+    os.makedirs(os.path.dirname(output_dir))
+
+var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=init_mult, mode='FAN_AVG')
 if tf_pm:
     nonlinearity = tf.nn.tanh
 else:
