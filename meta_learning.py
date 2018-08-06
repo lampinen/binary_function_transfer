@@ -7,13 +7,14 @@ import tensorflow as tf
 import tensorflow.contrib.slim as slim
 #from scipy.spatial.distance import pdist
 import datasets
+from orthogonal_matrices import random_orthogonal
 
 pi = np.pi
 ### Parameters
-num_input = 6
-num_output = 1
-num_hidden = 32
-num_hidden_hyper = 32
+num_input = 8
+num_output = 1 # cannot be changed without somewhat substantial code modifications
+num_hidden = 64
+num_hidden_hyper = 64
 num_runs = 20 
 init_learning_rate = 3e-4
 init_meta_learning_rate = 3e-4
@@ -28,23 +29,24 @@ refresh_meta_cache_every = 1#200 # how many epochs between updates to meta_datas
 train_momentum = 0.8
 adam_epsilon = 1e-3
 
-max_base_epochs = 5000 
+max_base_epochs = 3000 
 max_new_epochs = 1000 
 num_task_hidden_layers = 3
 num_meta_hidden_layers = 3
 output_dir = "meta_results/"
 save_every = 10 #20
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
+cue_dimensions = True # if true, provide two-hot cues of which dimensions are relevant
 hyper_convolutional = False # whether hyper network creates weights convolutionally
 conv_in_channels = 6
 
-batch_size = 64
-meta_batch_size = 48 # how much of each dataset the function embedding guesser sees 
+batch_size = 256
+meta_batch_size = 196 # how much of each dataset the function embedding guesser sees 
 early_stopping_thresh = 0.005
-base_tasks = ["X0", "NOTX0", "X0NOTX1", "NOTX0NOTX1", "OR", "AND", "NOTAND"]
+base_tasks = ["X0", "NOTX0", "AND", "NOTAND",  "X0NOTX1", "NOTX0NOTX1", "OR", "XOR", "NOTXOR"]
 base_meta_tasks = ["ID", "NOT"]
-base_task_repeats = 14 # how many times each base task is seen
-new_tasks = ["X0", "AND", "OR",  "X0NOTX1", "NOTX0NOTX1","NOTOR", "NOTAND", "XOR"]
+base_task_repeats = 27 # how many times each base task is seen
+new_tasks = ["X0", "AND", "OR",  "X0NOTX1", "NOTX0NOTX1","NOTOR", "NOTAND", "XOR", "NOTXOR"]
 ###
 var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1., mode='FAN_AVG')
 
@@ -121,9 +123,11 @@ def _get_dataset(task, num_input):
     elif task == "threeparity":
         x_data, y_data = datasets.parity_dataset(num_input, num_to_keep=3)
 
+    y_data = np.squeeze(y_data).astype(np.int32)
+
     if tf_pm:
         x_data = 2*x_data - 1
-        y_data = 2*y_data - 1
+#        y_data = 2*y_data - 1 # with output mapping, easier to think of these as 0,1 ints
 
     # shuffle columns so not always same inputs matter
     perm = _get_perm(task) 
@@ -132,10 +136,17 @@ def _get_dataset(task, num_input):
 
     x_data = x_data[:, perm] 
 
-    #padding
-    x_data = np.concatenate([x_data, np.zeros([len(x_data), num_hidden_hyper - num_input])], axis=1)
-    y_data = np.concatenate([np.zeros([len(y_data), num_hidden_hyper - num_output]), y_data], axis=1)
-    return {"x": x_data, "y": y_data, "relevant": [x0, x1]}
+#    #padding
+#    x_data = np.concatenate([x_data, np.zeros([len(x_data), num_hidden_hyper - num_input])], axis=1)
+#    y_data = np.concatenate([np.zeros([len(y_data), num_hidden_hyper - num_output]), y_data], axis=1)
+    if cue_dimensions:
+        cue_data = np.zeros_like(x_data)
+        cue_data[:, [x0, x1]] = 1.
+        x_data = np.concatenate([x_data, cue_data], axis=-1)
+
+    dataset = {"x": x_data, "y": y_data, "relevant": [x0, x1]}
+
+    return dataset 
 
 class meta_model(object):
     """A meta-learning model for binary functions."""
@@ -172,14 +183,55 @@ class meta_model(object):
         self.task_to_index = dict(zip(self.all_tasks, range(num_tasks)))
 
         # network
-        self.base_input_ph = tf.placeholder(tf.float32, shape=[None, num_hidden_hyper])
-        self.base_target_ph = tf.placeholder(tf.float32, shape=[None, num_hidden_hyper])
+        self.is_base_task = tf.placeholder_with_default(True, []) # whether to calculate loss as XE on output modes, or L2 over all 
+
+        # base task input
+        input_size = 2*num_input if cue_dimensions else num_input 
+        self.base_input_ph = tf.placeholder(tf.float32, shape=[None, input_size])
+        self.base_target_ph = tf.placeholder(tf.int32, shape=[None,])
         self.lr_ph = tf.placeholder(tf.float32)
 
-        # function embedding "guessing" network 
-        self.guess_input_ph = tf.placeholder(tf.float32, shape=[None, 2 * num_hidden_hyper])
+        input_processing_1 = slim.fully_connected(self.base_input_ph, num_hidden, 
+                                                  activation_fn=internal_nonlinearity) 
 
-        guess_hidden_1 = slim.fully_connected(self.guess_input_ph, num_hidden_hyper,
+        processed_input = slim.fully_connected(input_processing_1, num_hidden_hyper, 
+                                               activation_fn=internal_nonlinearity) 
+
+        self.target_processor = tf.constant(random_orthogonal(num_hidden_hyper)[:, :2], dtype=tf.float32)
+
+        target_one_hot = tf.one_hot(self.base_target_ph, 2)
+        processed_targets = tf.matmul(target_one_hot, tf.transpose(self.target_processor)) 
+
+        def output_mapping(X):
+            """hidden space mapped back to T/F output logits"""
+            res = tf.matmul(X, self.target_processor)
+            return res
+
+        # dummy fills for placeholders when they're switched off,
+        # because tensorflow is silly
+        self.dummy_base_input = np.zeros([batch_size, input_size])
+        self.dummy_base_output = np.zeros([batch_size])
+        self.dummy_meta_input = np.zeros([batch_size, num_hidden_hyper])
+        self.dummy_meta_output = np.zeros([batch_size, num_hidden_hyper])
+
+        # meta task input
+        self.meta_input_ph = tf.placeholder(tf.float32, shape=[None, num_hidden_hyper])
+        self.meta_target_ph = tf.placeholder(tf.float32, shape=[None, num_hidden_hyper])
+
+        processed_input = tf.cond(self.is_base_task,
+            lambda: processed_input,
+            lambda: self.meta_input_ph)
+        processed_targets = tf.cond(self.is_base_task,
+            lambda: processed_targets,
+            lambda: self.meta_target_ph)
+        
+        # function embedding "guessing" network 
+        self.guess_input_mask_ph = tf.placeholder(tf.bool, shape=[None]) # which datapoints get excluded from the guess
+
+        guess_input = tf.concat([processed_input, processed_targets], axis=-1)
+        guess_input = tf.boolean_mask(guess_input, self.guess_input_mask_ph)
+
+        guess_hidden_1 = slim.fully_connected(guess_input, num_hidden_hyper,
                                               activation_fn=internal_nonlinearity) 
         guess_hidden_2 = slim.fully_connected(guess_hidden_1, num_hidden_hyper,
                                               activation_fn=internal_nonlinearity) 
@@ -274,64 +326,80 @@ class meta_model(object):
         bfinal = tf.squeeze(bfinal, axis=0)
 
         # task network
-        task_hidden = self.base_input_ph
+        task_hidden = processed_input 
         for i in range(num_task_hidden_layers):
             task_hidden = internal_nonlinearity(tf.matmul(task_hidden, self.hidden_weights[i]) + self.hidden_biases[i])
-        self.output = output_nonlinearity(tf.matmul(task_hidden, Wfinal) + bfinal)
-        
+        self.raw_output = tf.matmul(task_hidden, Wfinal) + bfinal
+        mapped_output = output_mapping(self.raw_output)
+        self.base_output = tf.nn.softmax(mapped_output)
 
-        self.base_is_masked = tf.placeholder_with_default(True, []) # whether to mask loss to just strict "output" units
-        self.base_loss = tf.cond(self.base_is_masked,
-            lambda: tf.reduce_sum(tf.square(self.output - self.base_target_ph)[:, -num_output:], axis=1),
-            lambda: tf.reduce_sum(tf.square(self.output - self.base_target_ph), axis=1))
+        print(self.raw_output.get_shape())
+        print(mapped_output.get_shape())
+
+        self.base_loss = tf.cond(self.is_base_task,
+            lambda: tf.nn.softmax_cross_entropy_with_logits(labels=target_one_hot, 
+                                                            logits=mapped_output),
+            lambda: tf.reduce_sum(tf.square(self.raw_output - processed_targets), axis=1))
         self.total_base_loss = tf.reduce_mean(self.base_loss)
         #base_full_optimizer = tf.train.MomentumOptimizer(self.lr_ph, train_momentum)
         base_full_optimizer = tf.train.RMSPropOptimizer(self.lr_ph)
         self.base_full_train = base_full_optimizer.minimize(self.total_base_loss)
+
 
         # initialize
         self.sess = tf.Session()
         self.sess.run(tf.global_variables_initializer())
         
     
-    def _guess_dataset(self, dataset):
-        return np.concatenate([dataset["x"], dataset["y"]],
-                              axis=1)
+#    def _guess_dataset(self, dataset):
+#        return np.concatenate([dataset["x"], dataset["y"]],
+#                              axis=1)
+#
+#    
+    def _guess_mask(self, dataset_length):
+        mask = np.zeros(dataset_length, dtype=np.bool)
+        indices = np.random.permutation(dataset_length)[:meta_batch_size]
+        mask[indices] = True
+        return mask
 
-    
-    def dataset_eval(self, dataset, zeros=False, mask=True):
-        guess_dataset = self._guess_dataset(dataset)
+    def dataset_eval(self, dataset, zeros=False, base=True):
         this_feed_dict = {
-            self.base_input_ph: dataset["x"],
-            self.guess_input_ph: np.zeros_like(guess_dataset) if zeros else guess_dataset,
-            self.base_is_masked: mask,
-            self.base_target_ph: dataset["y"]
+            self.base_input_ph: dataset["x"] if base else self.dummy_base_input,
+            self.guess_input_mask_ph: np.zeros(len(dataset["x"]), dtype=np.bool) if zeros else np.ones(len(dataset["x"]), dtype=np.bool),
+            self.is_base_task: base,
+            self.base_target_ph: dataset["y"] if base else self.dummy_base_output,
+            self.meta_input_ph: self.dummy_meta_input if base else dataset["x"],
+            self.meta_target_ph: self.dummy_meta_output if base else dataset["y"]
         }
         loss = self.sess.run(self.total_base_loss, feed_dict=this_feed_dict)
         return loss
 
 
-    def dataset_embedding_eval(self, dataset, embedding, zeros=False, mask=True):
+    def dataset_embedding_eval(self, dataset, embedding, zeros=False, base=True):
         this_feed_dict = {
             self.embedding_is_fed: True,
             self.feed_embedding_ph: np.zeros_like(embedding) if zeros else embedding,
-            self.guess_input_ph: np.zeros([1, 2*num_hidden_hyper]),
-            self.base_input_ph: dataset["x"],
-            self.base_is_masked: mask,
-            self.base_target_ph: dataset["y"]
+            self.base_input_ph: dataset["x"] if base else self.dummy_base_input,
+            self.guess_input_mask_ph: np.zeros(len(dataset["x"]), dtype=np.bool) if zeros else np.ones(len(dataset["x"]), dtype=np.bool),
+            self.is_base_task: base,
+            self.base_target_ph: dataset["y"] if base else self.dummy_base_output,
+            self.meta_input_ph: self.dummy_meta_input if base else dataset["x"],
+            self.meta_target_ph: self.dummy_meta_output if base else dataset["y"]
         }
         loss = self.sess.run(self.total_base_loss, feed_dict=this_feed_dict)
         return loss
 
 
-    def dataset_train_step(self, dataset, lr, mask=True):
-        guess_subset = np.random.permutation(len(dataset["y"]))[:meta_batch_size]
+    def dataset_train_step(self, dataset, lr, base=True):
+        guess_mask = self._guess_mask(len(dataset["x"]))
         this_feed_dict = {
-            self.base_input_ph: dataset["x"],
-            self.guess_input_ph: self._guess_dataset(dataset)[guess_subset, :],
-            self.base_target_ph: dataset["y"],
-            self.base_is_masked: mask,
-            self.lr_ph: lr
+            self.lr_ph: lr,
+            self.base_input_ph: dataset["x"] if base else self.dummy_base_input,
+            self.guess_input_mask_ph: guess_mask, 
+            self.is_base_task: base,
+            self.base_target_ph: dataset["y"] if base else self.dummy_base_output,
+            self.meta_input_ph: self.dummy_meta_input if base else dataset["x"],
+            self.meta_target_ph: self.dummy_meta_output if base else dataset["y"]
         }
         loss = self.sess.run(self.base_full_train, feed_dict=this_feed_dict)
         return loss
@@ -425,7 +493,7 @@ class meta_model(object):
         offset = len(self.new_tasks) # new come before meta in indices
         for task in self.base_meta_tasks:
             dataset = self.meta_dataset_cache[task]
-            losses[self.task_to_index[task] - offset] = self.dataset_eval(dataset, mask=False)
+            losses[self.task_to_index[task] - offset] = self.dataset_eval(dataset, base=False)
 
         return losses
 
@@ -450,22 +518,33 @@ class meta_model(object):
 
         for task in self.base_meta_tasks:
             dataset = self.meta_dataset_cache[task]
-            losses[self.task_to_index[task]] = self.dataset_eval(dataset, mask=False)
+            losses[self.task_to_index[task]] = self.dataset_eval(dataset, base=False)
 
         return losses
 
-    def get_outputs(self, dataset, new_dataset=None, full=False):
-        if new_dataset is None:
-            new_dataset = guess_dataset
+    def get_outputs(self, dataset, new_dataset=None, base=True):
+        if new_dataset is not None:
+            this_x = np.concatenate([dataset["x"], new_dataset["x"]], axis=0)
+            this_y = np.concatenate([dataset["y"], new_dataset["y"]], ayis=0)
+            this_mask = np.zeros(len(this_x), dtype=np.bool)
+            this_mask[:len(dataset["x"])] = 1. # use only these to guess
+        else:
+            this_x = dataset["x"]
+            this_y = dataset["y"]
+            this_mask = np.ones(len(dataset["x"]), dtype=np.bool)
+
         this_feed_dict = {
-            self.base_input_ph: new_dataset["x"],
-            self.guess_input_ph: self._guess_dataset(dataset) 
+            self.base_input_ph: this_x if base else self.dummy_base_input,
+            self.guess_input_mask_ph: this_mask,
+            self.is_base_task: base,
+            self.base_target_ph: this_y if base else self.dummy_base_output,
+            self.meta_input_ph: self.dummy_meta_input if base else this_x,
+            self.meta_target_ph: self.dummy_meta_output if base else this_y
         }
         outputs = self.sess.run(self.output, feed_dict=this_feed_dict)
-        if full:
-            return outputs
-        else:
-            return outputs[:, -1]
+        if new_dataset is not None:
+            outputs = outputs[len(dataset["x"]):, :]
+        return outputs
 
 
     def new_outputs(self, new_task, zeros=False):
@@ -474,13 +553,8 @@ class meta_model(object):
            baseline"""
         new_task_full_name = [t for t in self.new_tasks if new_task in t][0] 
         dataset = self.new_datasets[new_task_full_name]
-        guess_dataset = self._guess_dataset(dataset)
-        this_feed_dict = {
-            self.base_input_ph: dataset["x"],
-            self.guess_input_ph: np.zeros_like(guess_dataset) if zeros else guess_dataset,
-        }
-        outputs = self.sess.run(self.output, feed_dict=this_feed_dict)[:, -1]
-        return outputs
+        guess_dataset = np.zeros_like(guess_dataset) if zeros else guess_dataset
+        return self.get_outputs(guess_dataset, dataset)
 
 
     def train_base_tasks(self, filename):
@@ -508,8 +582,7 @@ class meta_model(object):
                 for task_i in order:
                     task = self.base_meta_tasks[task_i]
                     dataset =  self.meta_dataset_cache[task]
-                    self.dataset_train_step(dataset, meta_learning_rate, mask=False)
-
+                    self.dataset_train_step(dataset, meta_learning_rate, base=False)
 
                 if epoch % save_every == 0:
                     curr_losses = self.base_eval()
@@ -572,18 +645,18 @@ class meta_model(object):
                     order = np.random.permutation(self.num_tasks)
                     for task_i in order:
                         task = self.all_tasks[task_i]
-                        mask=True
+                        base=True
                         this_lr = learning_rate
                         if task in self.new_tasks:
                             dataset =  self.new_datasets[task]
                         elif task in self.base_meta_tasks:
                             dataset = self.meta_dataset_cache[task]
-                            mask=False
+                            base=False
                             this_lr = meta_learning_rate
                         else:
                             dataset =  self.base_datasets[task]
                         self.dataset_train_step(dataset, learning_rate, 
-                                                mask=mask)
+                                                base=base)
 
                     if epoch % save_every == 0:
                         curr_meta_true_losses, _ = self.meta_true_eval() 
@@ -611,14 +684,17 @@ class meta_model(object):
                 foutputs.write("trained_emb, " + ', '.join(["%f" for i in range(len(curr_net_outputs))]) % tuple(curr_net_outputs) + "\n")
 
 
-    def get_task_embedding(self, dataset):
+    def get_task_embedding(self, dataset, base=True):
         """Gets task embedding"""
-        guess_dataset = self._guess_dataset(dataset)
-
         return self.sess.run(
             self.function_embedding,
             feed_dict={
-                self.guess_input_ph: guess_dataset  
+                self.base_input_ph: dataset["x"] if base else self.dummy_base_input,
+                self.guess_input_mask_ph: np.ones(len(dataset["x"]), dtype=np.bool),
+                self.is_base_task: base,
+                self.base_target_ph: dataset["y"] if base else self.dummy_base_output,
+                self.meta_input_ph: self.dummy_meta_input if base else dataset["x"],
+                self.meta_target_ph: self.dummy_meta_output if base else dataset["y"]
             }) 
 
 
@@ -638,18 +714,21 @@ class meta_model(object):
             for task in self.all_tasks:
                 if task in self.new_tasks:
                     dataset =  self.new_datasets[task]
+                    base = True
                 elif task in self.base_tasks:
                     dataset =  self.base_datasets[task]
+                    base = True
                 else:
                     dataset = self.get_meta_dataset(task)
+                    base = False
                 task_i = self.task_to_index[task] 
-                task_embeddings[task_i, :] = self.get_task_embedding(dataset)
+                task_embeddings[task_i, :] = self.get_task_embedding(dataset, base=base)
 
             if meta_task is not None:
 		meta_dataset = self.get_meta_dataset(meta_task)
 		task_embeddings = self.get_outputs(meta_dataset,
 						   {"x": task_embeddings},
-						   full=True)
+						   base=False)
 
             for i in range(num_hidden_hyper):
                 fout.write(("%i, " %i) + (format_string % tuple(task_embeddings[:, i])))
