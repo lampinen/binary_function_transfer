@@ -1,0 +1,130 @@
+---
+title: "Problem sequence analyses"
+output: html_notebook
+---
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+
+```{r}
+input_shareds = c("False")#, "True")
+tasks = c("XOR_of_XORs", "XOR", "AND", "OR")
+lrs = c(0.005)
+nhs = c(80, 20)
+ims = c(1., 0.33)
+num_runs = 10
+num_epochs = 20000
+directory_format = "sequence_results_nh_%i_lr_%.4f_im_%.2f/"
+
+d = data.frame()
+for (run in 0:(num_runs-1)) {
+  for (input_shared in input_shareds) {
+    for (num_hidden in nhs) {
+      for (lr in lrs) {
+        for (init_mult in ims) {
+          directory = sprintf(directory_format, num_hidden, lr, init_mult)
+          for (task in tasks) {
+            filename = sprintf("%stask%s_sharedinput%s_run%i.csv", directory, task, input_shared, run)
+            if (!file.exists(filename)) {
+              next
+            }
+            this_d = tryCatch(read.csv(filename, header=T),
+                              error = function(cond) {return(NA)})
+            if (length(this_d) == 1 && is.na(this_d)) {
+              next
+            }
+            this_d$num_hidden = num_hidden
+            this_d$lr = lr
+            this_d$init_size = init_mult
+            this_d$run = run
+            this_d$task = task
+            this_d$input_shared = input_shared
+            d = bind_rows(d, this_d)
+
+          } 
+        }
+      }
+    }
+  }
+}
+```
+
+```{r}
+d = d %>%
+  gather(loss_index, loss, contains("loss")) %>%
+  mutate(task_repeat = epoch %/% num_epochs,
+         epoch = epoch %% num_epochs,
+         loss_index = substring(loss_index, 5)) %>% 
+  filter(loss_index == task_repeat) %>% # only keep the loss for the current task
+  select(-loss_index)
+  
+```
+
+```{r}
+success_d = d %>%
+  group_by(num_hidden, lr, init_size, input_shared, task, run, task_repeat) %>%
+  summarize(successful = any(loss < 0.05)) %>%
+  ungroup() %>%
+  group_by(num_hidden, lr, init_size, input_shared, task, task_repeat) %>%
+  summarize(pct_successful = sum(successful)/n()) %>%
+  ungroup()
+```
+
+```{r}
+theme_set(theme_bw())
+```
+
+```{r}
+ggplot(success_d, aes(x=task_repeat, y=pct_successful, color=task)) +
+  geom_point() +
+  geom_line() +
+  scale_color_brewer(palette="Dark2")+
+  facet_grid(num_hidden + init_size ~ lr)
+ggsave("plots/sequences/success_results.png")
+```
+
+```{r}
+time_d = d %>%
+  filter( loss < 0.05) %>%
+  group_by(num_hidden, lr, init_size, input_shared, task, run, task_repeat) %>%
+  summarize(success_time = min(epoch)) %>%
+  ungroup() %>%
+  group_by(num_hidden, lr, init_size, input_shared, task, task_repeat) %>%
+  summarize(success_time = mean(success_time)) %>%
+  ungroup()
+```
+
+
+```{r}
+ggplot(time_d, aes(x=task_repeat, y=success_time, color=task)) +
+  geom_point() +
+  geom_line() +
+  scale_color_brewer(palette="Dark2")+
+  facet_grid(num_hidden + init_size ~ lr, scales="free_y")
+ggsave("plots/sequences/success_time_results.png")
+```
+
+```{r}
+ggplot(time_d %>% filter(task %in% c("XOR")), aes(x=task_repeat, y=success_time, color=task)) +
+  geom_point() +
+  geom_line() +
+  scale_color_brewer(palette="Dark2")+
+  facet_grid(num_hidden + init_size ~ lr, scales="free_y")
+```
+Evidence of transfer for more complicated tasks (generally continuing to improve with repeats, especially when weights are small). In some cases (20 hidden, init_mult 0.33) even if initial learning is not successful it will benefit transfer(!).
+
+```{r}
+ggplot(time_d %>% filter(task %in% c("AND", "OR")), aes(x=task_repeat, y=success_time, color=task)) +
+  geom_point() +
+  geom_line() +
+  scale_color_brewer(palette="Dark2")+
+  facet_grid(num_hidden + init_size ~ lr, scales="free_y")
+ggsave("plots/sequences/success_time_results_easy.png")
+```
+
+By contrast, simpler tasks seem to show more negative transfer, especially AND (although learning is very fast so this may just be a capacity issue, maybe trying adding hidden units each time instead of giving them all from the beginning?)
