@@ -14,10 +14,10 @@ library(ggplot2)
 ```{r}
 input_shareds = c("False")#, "True")
 tasks = c("XOR_of_XORs", "XOR", "AND", "OR")
-lrs = c(0.005)
+lrs = c(0.005, 0.00125)
 nhs = c(80, 20)
 ims = c(1., 0.33)
-num_runs = 10
+num_runs = 100
 num_epochs = 20000
 directory_format = "sequence_results_nh_%i_lr_%.4f_im_%.2f/"
 
@@ -95,7 +95,10 @@ time_d = d %>%
   summarize(success_time = min(epoch)) %>%
   ungroup() %>%
   group_by(num_hidden, lr, init_size, input_shared, task, task_repeat) %>%
-  summarize(success_time = mean(success_time)) %>%
+  summarize(se_st = sd(success_time)/sqrt(n()),
+            success_time = mean(success_time),
+            st_lo = success_time - 1.96 * se_st,
+            st_hi = success_time + 1.96 * se_st) %>%
   ungroup()
 ```
 
@@ -103,6 +106,7 @@ time_d = d %>%
 ```{r}
 ggplot(time_d, aes(x=task_repeat, y=success_time, color=task)) +
   geom_point() +
+  geom_errorbar(aes(ymin=st_lo, ymax=st_hi), width=0.25) +
   geom_line() +
   scale_color_brewer(palette="Dark2")+
   facet_grid(num_hidden + init_size ~ lr, scales="free_y")
@@ -112,11 +116,13 @@ ggsave("plots/sequences/success_time_results.png")
 ```{r}
 ggplot(time_d %>% filter(task %in% c("XOR")), aes(x=task_repeat, y=success_time, color=task)) +
   geom_point() +
+  geom_errorbar(aes(ymin=st_lo, ymax=st_hi), width=0.25) +
   geom_line() +
-  scale_color_brewer(palette="Dark2")+
+  scale_color_brewer(palette="Dark2", drop=F)+
   facet_grid(num_hidden + init_size ~ lr, scales="free_y")
 ```
 Evidence of transfer for more complicated tasks (generally continuing to improve with repeats, especially when weights are small). In some cases (20 hidden, init_mult 0.33) even if initial learning is not successful it will benefit transfer(!).
+
 
 ```{r}
 ggplot(time_d %>% filter(task %in% c("AND", "OR")), aes(x=task_repeat, y=success_time, color=task)) +

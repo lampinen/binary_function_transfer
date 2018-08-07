@@ -133,6 +133,7 @@ ggplot(success_d, aes(x=t1, y=success_1_pct, fill=t2)) +
   geom_bar(stat="identity", position="dodge") +
   scale_color_brewer(palette="Dark2")+
   facet_grid(num_hidden + init_size ~ lr, scales="free_y")
+ggsave("plots/success_results.png")
 ```
 
 ```{r}
