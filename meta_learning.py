@@ -30,7 +30,7 @@ train_momentum = 0.8
 adam_epsilon = 1e-3
 
 max_base_epochs = 3000 
-max_new_epochs = 1000 
+max_new_epochs = 1000
 num_task_hidden_layers = 3
 num_meta_hidden_layers = 3
 output_dir = "meta_results/"
@@ -333,9 +333,6 @@ class meta_model(object):
         mapped_output = output_mapping(self.raw_output)
         self.base_output = tf.nn.softmax(mapped_output)
 
-        print(self.raw_output.get_shape())
-        print(mapped_output.get_shape())
-
         self.base_loss = tf.cond(self.is_base_task,
             lambda: tf.nn.softmax_cross_entropy_with_logits(labels=target_one_hot, 
                                                             logits=mapped_output),
@@ -456,7 +453,7 @@ class meta_model(object):
 
                         mapped_embedding = self.get_outputs(meta_dataset,
                                                             {"x": task_embedding},
-                                                            full=True)
+                                                            base=False)
 
                         names.append("NOT:" + task + "->" + other)
                         losses.append(self.dataset_embedding_eval(dataset, mapped_embedding))
@@ -472,7 +469,7 @@ class meta_model(object):
 
                     mapped_embedding = self.get_outputs(meta_dataset,
                                                         {"x": task_embedding},
-                                                        full=True)
+                                                        base=False)
 
                     names.append("ID:" + task + "->" + task)
                     losses.append(self.dataset_embedding_eval(dataset, mapped_embedding))
@@ -522,16 +519,20 @@ class meta_model(object):
 
         return losses
 
-    def get_outputs(self, dataset, new_dataset=None, base=True):
+    def get_outputs(self, dataset, new_dataset=None, base=True, zeros=False):
         if new_dataset is not None:
             this_x = np.concatenate([dataset["x"], new_dataset["x"]], axis=0)
-            this_y = np.concatenate([dataset["y"], new_dataset["y"]], ayis=0)
+            dummy_y = np.zeros(len(new_dataset["x"])) if base else np.zeros_like(new_dataset["x"])
+            this_y = np.concatenate([dataset["y"], dummy_y], axis=0)
             this_mask = np.zeros(len(this_x), dtype=np.bool)
             this_mask[:len(dataset["x"])] = 1. # use only these to guess
         else:
             this_x = dataset["x"]
             this_y = dataset["y"]
             this_mask = np.ones(len(dataset["x"]), dtype=np.bool)
+
+        if zeros:
+            this_mask = np.zeros_like(this_mask)
 
         this_feed_dict = {
             self.base_input_ph: this_x if base else self.dummy_base_input,
@@ -541,7 +542,10 @@ class meta_model(object):
             self.meta_input_ph: self.dummy_meta_input if base else this_x,
             self.meta_target_ph: self.dummy_meta_output if base else this_y
         }
-        outputs = self.sess.run(self.output, feed_dict=this_feed_dict)
+        this_fetch = self.base_output if base else self.raw_output 
+        outputs = self.sess.run(this_fetch, feed_dict=this_feed_dict)
+        if base:
+            outputs = 2*np.argmax(outputs, axis=-1) - 1
         if new_dataset is not None:
             outputs = outputs[len(dataset["x"]):, :]
         return outputs
@@ -553,8 +557,7 @@ class meta_model(object):
            baseline"""
         new_task_full_name = [t for t in self.new_tasks if new_task in t][0] 
         dataset = self.new_datasets[new_task_full_name]
-        guess_dataset = np.zeros_like(guess_dataset) if zeros else guess_dataset
-        return self.get_outputs(guess_dataset, dataset)
+        return self.get_outputs(dataset, zeros=zeros)
 
 
     def train_base_tasks(self, filename):
@@ -612,7 +615,7 @@ class meta_model(object):
                     dataset = self.new_datasets[new_task]
                     with open(filename_prefix + new_task + "_outputs.csv", "w") as foutputs:
                         foutputs.write("type, " + ', '.join(["input%i" % i for i in range(len(dataset["y"]))]) + "\n")
-                        foutputs.write("target, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(dataset["y"][:, -1].flatten()) + "\n")
+                        foutputs.write("target, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(dataset["y"].flatten()) + "\n")
 
                         curr_net_outputs = self.new_outputs(new_task, zeros=True)
                         foutputs.write("baseline, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(curr_net_outputs) + "\n")
