@@ -120,6 +120,7 @@ ggplot(time_d %>% filter(task %in% c("XOR")), aes(x=task_repeat, y=success_time,
   geom_line() +
   scale_color_brewer(palette="Dark2", drop=F)+
   facet_grid(num_hidden + init_size ~ lr, scales="free_y")
+ggsave("plots/sequences/success_time_results_XOR.png")
 ```
 Evidence of transfer for more complicated tasks (generally continuing to improve with repeats, especially when weights are small). In some cases (20 hidden, init_mult 0.33) even if initial learning is not successful it will benefit transfer(!).
 
