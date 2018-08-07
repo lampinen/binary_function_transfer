@@ -59,6 +59,13 @@ def X0NOTX1_dataset(num_inputs):
     y_data = [[x[0] * (1.-x[1])] for x in x_data]
     return np.array(x_data), np.array(y_data)
 
+def NOTX0NOTX1_dataset(num_inputs):
+    if num_inputs < 1:
+        raise ValueError("Too few inputs")
+    x_data = all_binary_possibilities(num_inputs)
+    y_data = [[1. - x[0] * (1.-x[1])] for x in x_data]
+    return np.array(x_data), np.array(y_data)
+
 def AND_dataset(num_inputs):
     if num_inputs < 2:
         raise ValueError("Too few inputs")
