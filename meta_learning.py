@@ -22,7 +22,7 @@ new_init_learning_rate = 1e-6
 new_init_meta_learning_rate = 1e-6
 lr_decay = 0.8
 meta_lr_decay = 0.8
-lr_decays_every = 200
+lr_decays_every = 100
 min_learning_rate = 5e-7
 refresh_meta_cache_every = 1#200 # how many epochs between updates to meta_dataset_cache
 
