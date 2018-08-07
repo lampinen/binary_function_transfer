@@ -29,8 +29,8 @@ refresh_meta_cache_every = 1#200 # how many epochs between updates to meta_datas
 train_momentum = 0.8
 adam_epsilon = 1e-3
 
-max_base_epochs = 3000 
-max_new_epochs = 1000
+max_base_epochs = 1 
+max_new_epochs = 1 
 num_task_hidden_layers = 3
 num_meta_hidden_layers = 3
 output_dir = "meta_results/"
@@ -43,8 +43,8 @@ conv_in_channels = 6
 batch_size = 256
 meta_batch_size = 196 # how much of each dataset the function embedding guesser sees 
 early_stopping_thresh = 0.005
-base_tasks = ["X0", "NOTX0", "AND", "NOTAND",  "X0NOTX1", "NOTX0NOTX1", "OR", "XOR", "NOTXOR"]
-base_meta_tasks = ["ID", "NOT"]
+base_tasks = ["X0", "NOTX0", "AND", "NOTAND", "X0NOTX1", "NOTX0NOTX1", "OR", "XOR", "NOTXOR"]
+base_meta_tasks = ["ID", "NOT", "isX0", "isNOTX0", "isAND", "isNOTAND", "isXOR", "isNOTXOR"]
 base_task_repeats = 27 # how many times each base task is seen
 new_tasks = ["X0", "AND", "OR",  "X0NOTX1", "NOTX0NOTX1","NOTOR", "NOTAND", "XOR", "NOTXOR"]
 ###
@@ -197,7 +197,8 @@ class meta_model(object):
         processed_input = slim.fully_connected(input_processing_1, num_hidden_hyper, 
                                                activation_fn=internal_nonlinearity) 
 
-        self.target_processor = tf.constant(random_orthogonal(num_hidden_hyper)[:, :2], dtype=tf.float32)
+        self.target_processor_nontf = random_orthogonal(num_hidden_hyper)[:, :2]
+        self.target_processor = tf.constant(self.target_processor_nontf, dtype=tf.float32)
 
         target_one_hot = tf.one_hot(self.base_target_ph, 2)
         processed_targets = tf.matmul(target_one_hot, tf.transpose(self.target_processor)) 
@@ -419,6 +420,15 @@ class meta_model(object):
                 embedding = self.get_task_embedding(self.base_datasets[task])[0, :]
                 x_data.append(embedding)
                 y_data.append(embedding)
+        elif meta_task[:2] == "is":
+            pos_class = meta_task[2:]
+            for task in self.base_tasks: 
+                x_data.append(self.get_task_embedding(self.base_datasets[task])[0, :])
+                task_type = task.split(";")[0]
+                if task_type == pos_class:
+                    y_data.append(self.target_processor_nontf[:, 1].transpose())
+                else:
+                    y_data.append(self.target_processor_nontf[:, 0].transpose())
 
         return {"x": np.array(x_data), "y": np.array(y_data)}
 
@@ -475,7 +485,8 @@ class meta_model(object):
                     losses.append(self.dataset_embedding_eval(dataset, mapped_embedding))
 
             else:
-                raise ValueError("Unrecognized meta task")
+                print("Skipping meta true eval: " + meta_task) 
+                continue
 
         return losses, names
 
