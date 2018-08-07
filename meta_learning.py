@@ -183,7 +183,9 @@ class meta_model(object):
         self.task_to_index = dict(zip(self.all_tasks, range(num_tasks)))
 
         # network
-        self.is_base_task = tf.placeholder_with_default(True, []) # whether to calculate loss as XE on output modes, or L2 over all 
+        self.is_base_input = tf.placeholder_with_default(True, []) # whether is base input 
+        self.is_base_output = tf.placeholder_with_default(True, []) # whether is base output:
+                                                                    # i.e. to calculate loss as XE on output modes, or L2 over all 
 
         # base task input
         input_size = 2*num_input if cue_dimensions else num_input 
@@ -219,10 +221,10 @@ class meta_model(object):
         self.meta_input_ph = tf.placeholder(tf.float32, shape=[None, num_hidden_hyper])
         self.meta_target_ph = tf.placeholder(tf.float32, shape=[None, num_hidden_hyper])
 
-        processed_input = tf.cond(self.is_base_task,
+        processed_input = tf.cond(self.is_base_input,
             lambda: processed_input,
             lambda: self.meta_input_ph)
-        processed_targets = tf.cond(self.is_base_task,
+        processed_targets = tf.cond(self.is_base_output,
             lambda: processed_targets,
             lambda: self.meta_target_ph)
         
@@ -334,7 +336,7 @@ class meta_model(object):
         mapped_output = output_mapping(self.raw_output)
         self.base_output = tf.nn.softmax(mapped_output)
 
-        self.base_loss = tf.cond(self.is_base_task,
+        self.base_loss = tf.cond(self.is_base_output,
             lambda: tf.nn.softmax_cross_entropy_with_logits(labels=target_one_hot, 
                                                             logits=mapped_output),
             lambda: tf.reduce_sum(tf.square(self.raw_output - processed_targets), axis=1))
@@ -360,44 +362,47 @@ class meta_model(object):
         mask[indices] = True
         return mask
 
-    def dataset_eval(self, dataset, zeros=False, base=True):
+    def dataset_eval(self, dataset, zeros=False, base_input=True, base_output=True):
         this_feed_dict = {
-            self.base_input_ph: dataset["x"] if base else self.dummy_base_input,
+            self.base_input_ph: dataset["x"] if base_input else self.dummy_base_input,
             self.guess_input_mask_ph: np.zeros(len(dataset["x"]), dtype=np.bool) if zeros else np.ones(len(dataset["x"]), dtype=np.bool),
-            self.is_base_task: base,
-            self.base_target_ph: dataset["y"] if base else self.dummy_base_output,
-            self.meta_input_ph: self.dummy_meta_input if base else dataset["x"],
-            self.meta_target_ph: self.dummy_meta_output if base else dataset["y"]
+            self.is_base_input: base_input,
+            self.is_base_output: base_output,
+            self.base_target_ph: dataset["y"] if base_output else self.dummy_base_output,
+            self.meta_input_ph: self.dummy_meta_input if base_input else dataset["x"],
+            self.meta_target_ph: self.dummy_meta_output if base_output else dataset["y"]
         }
         loss = self.sess.run(self.total_base_loss, feed_dict=this_feed_dict)
         return loss
 
 
-    def dataset_embedding_eval(self, dataset, embedding, zeros=False, base=True):
+    def dataset_embedding_eval(self, dataset, embedding, zeros=False, base_input=True, base_output=True, meta_binary=False):
         this_feed_dict = {
             self.embedding_is_fed: True,
             self.feed_embedding_ph: np.zeros_like(embedding) if zeros else embedding,
-            self.base_input_ph: dataset["x"] if base else self.dummy_base_input,
+            self.base_input_ph: dataset["x"] if base_input else self.dummy_base_input,
             self.guess_input_mask_ph: np.zeros(len(dataset["x"]), dtype=np.bool) if zeros else np.ones(len(dataset["x"]), dtype=np.bool),
-            self.is_base_task: base,
-            self.base_target_ph: dataset["y"] if base else self.dummy_base_output,
-            self.meta_input_ph: self.dummy_meta_input if base else dataset["x"],
-            self.meta_target_ph: self.dummy_meta_output if base else dataset["y"]
+            self.is_base_input: base_input,
+            self.is_base_output: base_output,
+            self.base_target_ph: dataset["y"] if base_output or meta_binary else self.dummy_base_output,
+            self.meta_input_ph: self.dummy_meta_input if base_input else dataset["x"],
+            self.meta_target_ph: self.dummy_meta_output if base_output or meta_binary else dataset["y"]
         }
         loss = self.sess.run(self.total_base_loss, feed_dict=this_feed_dict)
         return loss
 
 
-    def dataset_train_step(self, dataset, lr, base=True):
+    def dataset_train_step(self, dataset, lr, base_input=True, base_output=True, meta_binary=False):
         guess_mask = self._guess_mask(len(dataset["x"]))
         this_feed_dict = {
             self.lr_ph: lr,
-            self.base_input_ph: dataset["x"] if base else self.dummy_base_input,
+            self.base_input_ph: dataset["x"] if base_input else self.dummy_base_input,
             self.guess_input_mask_ph: guess_mask, 
-            self.is_base_task: base,
-            self.base_target_ph: dataset["y"] if base else self.dummy_base_output,
-            self.meta_input_ph: self.dummy_meta_input if base else dataset["x"],
-            self.meta_target_ph: self.dummy_meta_output if base else dataset["y"]
+            self.is_base_input: base_input,
+            self.is_base_output: base_output,
+            self.base_target_ph: dataset["y"] if base_output or meta_binary else self.dummy_base_output,
+            self.meta_input_ph: self.dummy_meta_input if base_input else dataset["x"],
+            self.meta_target_ph: self.dummy_meta_output if base_output or meta_binary else dataset["y"]
         }
         loss = self.sess.run(self.base_full_train, feed_dict=this_feed_dict)
         return loss
@@ -426,9 +431,9 @@ class meta_model(object):
                 x_data.append(self.get_task_embedding(self.base_datasets[task])[0, :])
                 task_type = task.split(";")[0]
                 if task_type == pos_class:
-                    y_data.append(self.target_processor_nontf[:, 1].transpose())
+                    y_data.append(1)
                 else:
-                    y_data.append(self.target_processor_nontf[:, 0].transpose())
+                    y_data.append(0)
 
         return {"x": np.array(x_data), "y": np.array(y_data)}
 
@@ -463,7 +468,8 @@ class meta_model(object):
 
                         mapped_embedding = self.get_outputs(meta_dataset,
                                                             {"x": task_embedding},
-                                                            base=False)
+                                                            base_input=False,
+                                                            base_output=False)
 
                         names.append("NOT:" + task + "->" + other)
                         losses.append(self.dataset_embedding_eval(dataset, mapped_embedding))
@@ -479,13 +485,14 @@ class meta_model(object):
 
                     mapped_embedding = self.get_outputs(meta_dataset,
                                                         {"x": task_embedding},
-                                                        base=False)
+                                                        base_input=False,
+                                                        base_output=False)
 
                     names.append("ID:" + task + "->" + task)
                     losses.append(self.dataset_embedding_eval(dataset, mapped_embedding))
 
             else:
-                print("Skipping meta true eval: " + meta_task) 
+                print("Skipping meta true eval: " + meta_task + " (not implemented)") 
                 continue
 
         return losses, names
@@ -501,7 +508,9 @@ class meta_model(object):
         offset = len(self.new_tasks) # new come before meta in indices
         for task in self.base_meta_tasks:
             dataset = self.meta_dataset_cache[task]
-            losses[self.task_to_index[task] - offset] = self.dataset_eval(dataset, base=False)
+            losses[self.task_to_index[task] - offset] = self.dataset_eval(dataset,
+                                                                          base_input=False, 
+                                                                          base_output=len(dataset["y"].shape) == 1)
 
         return losses
 
@@ -526,14 +535,16 @@ class meta_model(object):
 
         for task in self.base_meta_tasks:
             dataset = self.meta_dataset_cache[task]
-            losses[self.task_to_index[task]] = self.dataset_eval(dataset, base=False)
+            losses[self.task_to_index[task]] = self.dataset_eval(dataset,
+                                                                 base_input=False,
+                                                                 base_output=len(dataset["y"].shape) == 1)
 
         return losses
 
-    def get_outputs(self, dataset, new_dataset=None, base=True, zeros=False):
+    def get_outputs(self, dataset, new_dataset=None, base_input=True, base_output=True, zeros=False):
         if new_dataset is not None:
             this_x = np.concatenate([dataset["x"], new_dataset["x"]], axis=0)
-            dummy_y = np.zeros(len(new_dataset["x"])) if base else np.zeros_like(new_dataset["x"])
+            dummy_y = np.zeros(len(new_dataset["x"])) if base_output else np.zeros_like(new_dataset["x"])
             this_y = np.concatenate([dataset["y"], dummy_y], axis=0)
             this_mask = np.zeros(len(this_x), dtype=np.bool)
             this_mask[:len(dataset["x"])] = 1. # use only these to guess
@@ -546,16 +557,17 @@ class meta_model(object):
             this_mask = np.zeros_like(this_mask)
 
         this_feed_dict = {
-            self.base_input_ph: this_x if base else self.dummy_base_input,
+            self.base_input_ph: this_x if base_input else self.dummy_base_input,
             self.guess_input_mask_ph: this_mask,
-            self.is_base_task: base,
-            self.base_target_ph: this_y if base else self.dummy_base_output,
-            self.meta_input_ph: self.dummy_meta_input if base else this_x,
-            self.meta_target_ph: self.dummy_meta_output if base else this_y
+            self.is_base_input: base_input,
+            self.is_base_output: base_output,
+            self.base_target_ph: this_y if base_output else self.dummy_base_output,
+            self.meta_input_ph: self.dummy_meta_input if base_input else this_x,
+            self.meta_target_ph: self.dummy_meta_output if base_output else this_y
         }
-        this_fetch = self.base_output if base else self.raw_output 
+        this_fetch = self.base_output if base_output else self.raw_output 
         outputs = self.sess.run(this_fetch, feed_dict=this_feed_dict)
-        if base:
+        if base_output:
             outputs = 2*np.argmax(outputs, axis=-1) - 1
         if new_dataset is not None:
             outputs = outputs[len(dataset["x"]):, :]
@@ -596,7 +608,9 @@ class meta_model(object):
                 for task_i in order:
                     task = self.base_meta_tasks[task_i]
                     dataset =  self.meta_dataset_cache[task]
-                    self.dataset_train_step(dataset, meta_learning_rate, base=False)
+                    self.dataset_train_step(dataset, meta_learning_rate, 
+                                            base_output=len(dataset["y"].shape) == 1,
+                                            base_input=False)
 
                 if epoch % save_every == 0:
                     curr_losses = self.base_eval()
@@ -659,18 +673,21 @@ class meta_model(object):
                     order = np.random.permutation(self.num_tasks)
                     for task_i in order:
                         task = self.all_tasks[task_i]
-                        base=True
+                        base_input=True
+                        base_output=True
                         this_lr = learning_rate
                         if task in self.new_tasks:
                             dataset =  self.new_datasets[task]
                         elif task in self.base_meta_tasks:
                             dataset = self.meta_dataset_cache[task]
-                            base=False
+                            base_input=False
+                            base_output=len(dataset["y"].shape) == 1
                             this_lr = meta_learning_rate
                         else:
                             dataset =  self.base_datasets[task]
                         self.dataset_train_step(dataset, learning_rate, 
-                                                base=base)
+                                                base_input=base_input,
+                                                base_output=base_output)
 
                     if epoch % save_every == 0:
                         curr_meta_true_losses, _ = self.meta_true_eval() 
@@ -698,17 +715,18 @@ class meta_model(object):
                 foutputs.write("trained_emb, " + ', '.join(["%f" for i in range(len(curr_net_outputs))]) % tuple(curr_net_outputs) + "\n")
 
 
-    def get_task_embedding(self, dataset, base=True):
+    def get_task_embedding(self, dataset, base_input=True, base_output=True):
         """Gets task embedding"""
         return self.sess.run(
             self.function_embedding,
             feed_dict={
-                self.base_input_ph: dataset["x"] if base else self.dummy_base_input,
+                self.base_input_ph: dataset["x"] if base_input else self.dummy_base_input,
                 self.guess_input_mask_ph: np.ones(len(dataset["x"]), dtype=np.bool),
-                self.is_base_task: base,
-                self.base_target_ph: dataset["y"] if base else self.dummy_base_output,
-                self.meta_input_ph: self.dummy_meta_input if base else dataset["x"],
-                self.meta_target_ph: self.dummy_meta_output if base else dataset["y"]
+                self.is_base_input: base_input,
+                self.is_base_output: base_output,
+                self.base_target_ph: dataset["y"] if base_output else self.dummy_base_output,
+                self.meta_input_ph: self.dummy_meta_input if base_input else dataset["x"],
+                self.meta_target_ph: self.dummy_meta_output if base_output else dataset["y"]
             }) 
 
 
@@ -726,23 +744,27 @@ class meta_model(object):
             task_embeddings = np.zeros([len(self.all_tasks), num_hidden_hyper])
 
             for task in self.all_tasks:
+                base_input = True
+                base_output = True
                 if task in self.new_tasks:
                     dataset =  self.new_datasets[task]
-                    base = True
                 elif task in self.base_tasks:
                     dataset =  self.base_datasets[task]
-                    base = True
                 else:
                     dataset = self.get_meta_dataset(task)
-                    base = False
+                    base_input = False 
+                    base_output = len(dataset["y"].shape) == 1
                 task_i = self.task_to_index[task] 
-                task_embeddings[task_i, :] = self.get_task_embedding(dataset, base=base)
+                task_embeddings[task_i, :] = self.get_task_embedding(dataset, 
+                                                                     base_input=base_input,
+                                                                     base_output=base_output)
 
             if meta_task is not None:
 		meta_dataset = self.get_meta_dataset(meta_task)
 		task_embeddings = self.get_outputs(meta_dataset,
 						   {"x": task_embeddings},
-						   base=False)
+						   base_input=False,
+                                                   base_output=False)
 
             for i in range(num_hidden_hyper):
                 fout.write(("%i, " %i) + (format_string % tuple(task_embeddings[:, i])))
@@ -761,12 +783,16 @@ for run_i in xrange(num_runs):
     model.train_base_tasks(filename=output_dir + filename_prefix + "_base_losses.csv")
     model.save_embeddings(filename=output_dir + filename_prefix + "_guess_embeddings.csv")
     for meta_task in base_meta_tasks:
+        if meta_task[:2] == "is": # not a true meta mapping
+            continue 
         model.save_embeddings(filename=output_dir + filename_prefix + "_" + meta_task + "_guess_embeddings.csv",
                               meta_task=meta_task)
 
     model.train_new_tasks(filename_prefix=output_dir + filename_prefix + "_new_")
     model.save_embeddings(filename=output_dir + filename_prefix + "_final_embeddings.csv")
     for meta_task in base_meta_tasks:
+        if meta_task[:2] == "is": # not a true meta mapping
+            continue 
         model.save_embeddings(filename=output_dir + filename_prefix + "_" + meta_task + "_final_embeddings.csv",
                               meta_task=meta_task)
 
