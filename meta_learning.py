@@ -16,14 +16,14 @@ num_output = 1 # cannot be changed without somewhat substantial code modificatio
 num_hidden = 64
 num_hidden_hyper = 64
 num_runs = 20 
-init_learning_rate = 3e-4
-init_meta_learning_rate = 3e-4
+init_learning_rate = 1e-4
+init_meta_learning_rate = 1e-4
 new_init_learning_rate = 1e-6
 new_init_meta_learning_rate = 1e-6
 lr_decay = 0.8
 meta_lr_decay = 0.8
 lr_decays_every = 100
-min_learning_rate = 5e-7
+min_learning_rate = 1e-7
 refresh_meta_cache_every = 1#200 # how many epochs between updates to meta_dataset_cache
 
 train_momentum = 0.8
@@ -37,16 +37,17 @@ output_dir = "meta_results/"
 save_every = 10 #20
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 cue_dimensions = True # if true, provide two-hot cues of which dimensions are relevant
+base_hard_eval = True # eval on accuracy on thresholded values, which is bounded and more interpretable than XE loss.
 hyper_convolutional = False # whether hyper network creates weights convolutionally
 conv_in_channels = 6
 
 batch_size = 256
 meta_batch_size = 196 # how much of each dataset the function embedding guesser sees 
 early_stopping_thresh = 0.005
-base_tasks = ["X0", "NOTX0", "AND", "NOTAND", "X0NOTX1", "NOTX0NOTX1", "OR", "XOR", "NOTXOR"]
-base_meta_tasks = ["ID", "NOT", "isX0", "isNOTX0", "isAND", "isNOTAND", "isXOR", "isNOTXOR"]
+base_tasks = ["X0", "NOTX0", "AND", "NOTAND", "OR", "XOR", "NOTXOR"]
+base_meta_tasks = ["ID", "NOT", "isX0", "isNOTX0", "isAND", "isNOTAND", "isOR", "isXOR", "isNOTXOR"]
 base_task_repeats = 27 # how many times each base task is seen
-new_tasks = ["X0", "AND", "OR",  "X0NOTX1", "NOTX0NOTX1","NOTOR", "NOTAND", "XOR", "NOTXOR"]
+new_tasks = ["X0", "AND", "OR", "NOTOR", "NOTAND", "XOR", "NOTXOR"]
 ###
 var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1., mode='FAN_AVG')
 
@@ -336,14 +337,19 @@ class meta_model(object):
         mapped_output = output_mapping(self.raw_output)
         self.base_output = tf.nn.softmax(mapped_output)
 
-        self.base_loss = tf.cond(self.is_base_output,
+        self.loss = tf.cond(self.is_base_output,
             lambda: tf.nn.softmax_cross_entropy_with_logits(labels=target_one_hot, 
                                                             logits=mapped_output),
             lambda: tf.reduce_sum(tf.square(self.raw_output - processed_targets), axis=1))
-        self.total_base_loss = tf.reduce_mean(self.base_loss)
+        self.base_hard_loss = tf.cast(tf.equal(tf.argmax(target_one_hot, axis=-1),
+                                               tf.argmax(mapped_output, axis=-1)),
+                                      tf.float32)
+
+        self.total_loss = tf.reduce_mean(self.loss)
+        self.total_base_hard_loss = tf.reduce_mean(self.base_hard_loss)
         #base_full_optimizer = tf.train.MomentumOptimizer(self.lr_ph, train_momentum)
         base_full_optimizer = tf.train.RMSPropOptimizer(self.lr_ph)
-        self.base_full_train = base_full_optimizer.minimize(self.total_base_loss)
+        self.base_full_train = base_full_optimizer.minimize(self.total_loss)
 
 
         # initialize
@@ -372,7 +378,8 @@ class meta_model(object):
             self.meta_input_ph: self.dummy_meta_input if base_input else dataset["x"],
             self.meta_target_ph: self.dummy_meta_output if base_output else dataset["y"]
         }
-        loss = self.sess.run(self.total_base_loss, feed_dict=this_feed_dict)
+        fetch  = self.total_base_hard_loss if base_output and base_hard_eval else self.total_loss 
+        loss = self.sess.run(fetch, feed_dict=this_feed_dict)
         return loss
 
 
@@ -388,7 +395,8 @@ class meta_model(object):
             self.meta_input_ph: self.dummy_meta_input if base_input else dataset["x"],
             self.meta_target_ph: self.dummy_meta_output if base_output or meta_binary else dataset["y"]
         }
-        loss = self.sess.run(self.total_base_loss, feed_dict=this_feed_dict)
+        fetch  = self.total_base_hard_loss if base_output and base_hard_eval else self.total_loss 
+        loss = self.sess.run(fetch, feed_dict=this_feed_dict)
         return loss
 
 
