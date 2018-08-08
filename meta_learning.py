@@ -15,7 +15,8 @@ num_input = 8
 num_output = 1 # cannot be changed without somewhat substantial code modifications
 num_hidden = 64
 num_hidden_hyper = 64
-num_runs = 20 
+num_runs = 10 
+run_offset = 0
 init_learning_rate = 1e-4
 init_meta_learning_rate = 1e-4
 new_init_learning_rate = 1e-6
@@ -29,8 +30,8 @@ refresh_meta_cache_every = 1#200 # how many epochs between updates to meta_datas
 train_momentum = 0.8
 adam_epsilon = 1e-3
 
-max_base_epochs = 3000 
-max_new_epochs = 1000
+max_base_epochs = 2500 
+max_new_epochs = 200
 num_task_hidden_layers = 3
 num_meta_hidden_layers = 3
 output_dir = "meta_results/"
@@ -780,7 +781,7 @@ class meta_model(object):
                 
 ## running stuff
 
-for run_i in xrange(num_runs):
+for run_i in xrange(run_offset, run_offset+num_runs):
     np.random.seed(run_i)
     perm_list_dict = {task: (np.random.permutation(_get_perm_list_template(num_input)) if task not in ["XO", "NOTX0"] else np.random.permutation(_get_single_perm_list_template(num_input))) for task in total_tasks} 
     tf.set_random_seed(run_i)
