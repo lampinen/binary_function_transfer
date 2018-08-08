@@ -341,9 +341,10 @@ class meta_model(object):
             lambda: tf.nn.softmax_cross_entropy_with_logits(labels=target_one_hot, 
                                                             logits=mapped_output),
             lambda: tf.reduce_sum(tf.square(self.raw_output - processed_targets), axis=1))
-        self.base_hard_loss = tf.cast(tf.equal(tf.argmax(target_one_hot, axis=-1),
-                                               tf.argmax(mapped_output, axis=-1)),
-                                      tf.float32)
+        self.base_hard_loss = tf.cast(
+            tf.logical_not(tf.equal(tf.argmax(target_one_hot, axis=-1),
+                                    tf.argmax(mapped_output, axis=-1))),
+                           tf.float32)
 
         self.total_loss = tf.reduce_mean(self.loss)
         self.total_base_hard_loss = tf.reduce_mean(self.base_hard_loss)
