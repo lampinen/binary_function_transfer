@@ -46,7 +46,7 @@ batch_size = 256
 meta_batch_size = 196 # how much of each dataset the function embedding guesser sees 
 early_stopping_thresh = 0.005
 base_tasks = ["X0", "NOTX0", "AND", "NOTAND", "OR", "XOR", "NOTXOR"]
-base_meta_tasks = ["ID", "NOT", "isX0", "isNOTX0", "isAND", "isNOTAND", "isOR", "isXOR", "isNOTXOR"]
+base_meta_tasks = ["isX0", "isNOTX0", "isAND", "isNOTAND", "isOR", "isXOR", "isNOTXOR", "ID", "NOT"]
 base_task_repeats = 27 # how many times each base task is seen
 new_tasks = ["X0", "AND", "OR", "NOTOR", "NOTAND", "XOR", "NOTXOR"]
 ###
@@ -357,6 +357,7 @@ class meta_model(object):
         # initialize
         self.sess = tf.Session()
         self.sess.run(tf.global_variables_initializer())
+        self.refresh_meta_dataset_cache()
         
     
 #    def _guess_dataset(self, dataset):
@@ -435,9 +436,9 @@ class meta_model(object):
                     continue
                 other = task[:2] + task[5:] if "NOT" in task else task[:2] + "NOT" + task[2:]
                 if other in self.base_meta_tasks:
-                    embedding = self.get_task_embedding(self.get_meta_dataset(task), 
+                    embedding = self.get_task_embedding(self.meta_dataset_cache[task], 
                                                         base_input=False)[0, :]
-                    other_embedding = self.get_task_embedding(self.get_meta_dataset(other), 
+                    other_embedding = self.get_task_embedding(self.meta_dataset_cache[other], 
                                                               base_input=False)[0, :]
                     x_data.append(embedding)
                     y_data.append(other_embedding)
@@ -451,7 +452,7 @@ class meta_model(object):
             for task in self.base_meta_tasks:
                 if task[:2] != "is": # restrict to only classification tasks
                     continue
-                embedding = self.get_task_embedding(self.get_meta_dataset(task), 
+                embedding = self.get_task_embedding(self.meta_dataset_cache[task], 
                                                     base_input=False)[0, :]
                 x_data.append(embedding)
                 y_data.append(embedding)
@@ -625,8 +626,7 @@ class meta_model(object):
             for epoch in range(max_base_epochs):
 
                 if epoch % refresh_meta_cache_every == 0:
-                    for task in self.base_meta_tasks:
-                        self.meta_dataset_cache[task] = self.get_meta_dataset(task)
+                    self.refresh_meta_dataset_cache()
 
                 order = np.random.permutation(len(self.base_tasks))
                 for task_i in order:
@@ -658,6 +658,11 @@ class meta_model(object):
                     meta_learning_rate *= meta_lr_decay
 
 
+    def refresh_meta_dataset_cache(self):
+        for task in self.base_meta_tasks:
+            self.meta_dataset_cache[task] = self.get_meta_dataset(task)
+
+
     def train_new_tasks(self, filename_prefix):
         print("Now training new tasks...")
 
@@ -677,8 +682,7 @@ class meta_model(object):
                         curr_net_outputs = self.new_outputs(new_task, zeros=False)
                         foutputs.write("guess_emb, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(curr_net_outputs) + "\n")
 
-                for task in self.base_meta_tasks:
-                    self.meta_dataset_cache[task] = self.get_meta_dataset(task)
+                self.refresh_meta_dataset_cache()
 
                 curr_meta_true_losses, meta_true_names = self.meta_true_eval() 
                 fout_meta.write("epoch, " + ", ".join(meta_true_names) + "\n")
@@ -697,8 +701,7 @@ class meta_model(object):
                 meta_learning_rate = new_init_meta_learning_rate
                 for epoch in range(1, max_new_epochs):
                     if epoch % refresh_meta_cache_every == 0:
-                        for task in self.base_meta_tasks:
-                            self.meta_dataset_cache[task] = self.get_meta_dataset(task)
+                        self.refresh_meta_dataset_cache()
 
                     order = np.random.permutation(self.num_tasks)
                     for task_i in order:
