@@ -430,9 +430,29 @@ class meta_model(object):
                     other = other_tasks[0]
                     x_data.append(self.get_task_embedding(self.base_datasets[task])[0, :])
                     y_data.append(self.get_task_embedding(self.base_datasets[other])[0, :])
+            for task in self.base_meta_tasks:
+                if task[:2] != "is": # restrict to only classification tasks
+                    continue
+                other = task[:2] + task[5:] if "NOT" in task else task[:2] + "NOT" + task[2:]
+                if other in self.base_meta_tasks:
+                    embedding = self.get_task_embedding(self.get_meta_dataset(task), 
+                                                        base_input=False)[0, :]
+                    other_embedding = self.get_task_embedding(self.get_meta_dataset(other), 
+                                                              base_input=False)[0, :]
+                    x_data.append(embedding)
+                    y_data.append(other_embedding)
         elif meta_task == "ID":
             for task in self.base_tasks: 
+                if task[:2] != "is": # restrict to only classification tasks
+                    continue
                 embedding = self.get_task_embedding(self.base_datasets[task])[0, :]
+                x_data.append(embedding)
+                y_data.append(embedding)
+            for task in self.base_meta_tasks:
+                if task[:2] != "is": # restrict to only classification tasks
+                    continue
+                embedding = self.get_task_embedding(self.get_meta_dataset(task), 
+                                                    base_input=False)[0, :]
                 x_data.append(embedding)
                 y_data.append(embedding)
         elif meta_task[:2] == "is":
