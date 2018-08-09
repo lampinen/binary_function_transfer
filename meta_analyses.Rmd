@@ -14,15 +14,20 @@ theme_set(theme_bw() +
 ```
 
 ```{r}
-meta_tasks = c("ID", "NOT")
-truly_new_tasks = c("NOTOR", "XOR", "NOTXOR")
-nruns = 5
+meta_mapping_tasks = c("ID", "NOT")
+meta_classification_tasks = c("isX0", "isNOTX0", "isAND", "isOR", "isNOTAND", "isXOR", "isNOTXOR")
+truly_new_tasks = c("NOTOR")
+nruns = 30
 ```
 
 ```{r}
 d = data.frame()
 for (run_i in 0:(nruns-1)) {
-  this_d = read.csv(sprintf("meta_results_6/run%i_new_new_losses.csv", run_i), header=T)
+  filename = sprintf("meta_results/run%i_new_new_losses.csv", run_i)
+  if (!file.exists(filename)) {
+    next
+  }
+  this_d = read.csv(filename, header=T)
   this_d$run = run_i
   this_d = this_d %>% 
     select(run, epoch, contains("new")) %>%
@@ -64,21 +69,23 @@ guess_summarized_d = d %>%
 ```
 
 ```{r}
-ggplot(data=guess_summarized_d %>% filter(!(new_task %in% c("XOR", "X0")), type == "guess"), aes(x=new_task, y=loss, fill=condition)) +
+ggplot(data=guess_summarized_d %>% filter(!(new_task %in% c("X0")), type == "guess"), aes(x=new_task, y=loss, fill=condition)) +
   geom_bar(stat="identity", position="dodge") + 
   geom_errorbar(aes(ymin=loss_ci_lo, ymax=loss_ci_hi), position="dodge", width=0.5) +
   scale_fill_brewer(palette="Dark2") +
-  geom_hline(yintercept=1.0, alpha=0.5, linetype=2)
+  labs(x="New task", y="Proportion wrong") +
+  geom_hline(yintercept=0.5, alpha=0.5, linetype=2)
 ```
 ```{r}
 ggsave("plots/meta/meta_res.png")
 ```
 ```{r}
-ggplot(data=guess_summarized_d %>% filter(!(new_task %in% c("XOR", "X0")), type == "trained"), aes(x=new_task, y=loss, fill=condition)) +
+ggplot(data=guess_summarized_d %>% filter(!(new_task %in% c("X0")), type == "trained"), aes(x=new_task, y=loss, fill=condition)) +
   geom_bar(stat="identity", position="dodge") + 
   geom_errorbar(aes(ymin=loss_ci_lo, ymax=loss_ci_hi), position="dodge", width=0.5) +
   scale_fill_brewer(palette="Dark2") +
-  geom_hline(yintercept=1.0, alpha=0.5, linetype=2)
+  labs(x="New task", y="Proportion wrong") +
+  geom_hline(yintercept=0.5, alpha=0.5, linetype=2)
 ```
 ```{r}
 ggsave("plots/meta/meta_res_final.png")
@@ -89,29 +96,48 @@ ggsave("plots/meta/meta_res_final.png")
 for (emb_type in c("guess", "final")) {
   emb_d = data.frame()
   for (run_i in 0:(nruns-1)) {
-    this_d = read.csv(sprintf("meta_results/run%i_%s_embeddings.csv", run_i, emb_type), header=T)
+    filename = sprintf("meta_results/run%i_%s_embeddings.csv", run_i, emb_type)
+    if (!file.exists(filename)) {
+      next
+    }
+    this_d = read.csv(filename, header=T)
     this_d$run = run_i
     emb_d = bind_rows(emb_d, this_d)
   }
-  pcs = prcomp(emb_d %>% select(-dimension, -run, -one_of(meta_tasks)), center=T, scale=T)
+  pcs = prcomp(emb_d %>% select(-dimension, -run, -one_of(meta_mapping_tasks), -one_of(meta_classification_tasks)), center=T, scale=T)
   pc_d = data.frame(pcs$rotation)
   pc_d$task = row.names(pc_d)
   ggplot(pc_d, aes(x=PC1, y=PC2, color=task)) +
     geom_point() +
     geom_text(aes(label=task)) 
-  ggsave(sprintf("plots/meta/PCA_%s.png", emb_type), width=15, height=7)
+  ggsave(sprintf("plots/meta/PCA_%s.png", emb_type), width=20, height=7)
+  pcs = prcomp(emb_d %>% select(-dimension, -run), center=T, scale=T)
+  pc_d = data.frame(pcs$rotation)
+  pc_d$task = row.names(pc_d)
+  ggplot(pc_d, aes(x=PC1, y=PC2, color=task)) +
+    geom_point() +
+    geom_text(aes(label=task)) 
+  ggsave(sprintf("plots/meta/PCA_full_%s.png", emb_type), width=20, height=7)
 }
 ```
 
 ```{r}
 emb_type = "guess"
 emb_d = data.frame()
-for (meta_task in c("None", meta_tasks)) {
+for (meta_task in c("None", meta_mapping_tasks)) {
   for (run_i in 0:(nruns-1)) {
     if (meta_task == "None") {
-      this_d = read.csv(sprintf("meta_results/run%i_%s_embeddings.csv", run_i, emb_type), header=T)
+      filename = sprintf("meta_results/run%i_%s_embeddings.csv", run_i, emb_type)
+      if (!file.exists(filename)) {
+        next 
+      }
+      this_d = read.csv(filename, header=T)
     } else {
-      this_d = read.csv(sprintf("meta_results/run%i_%s_%s_embeddings.csv", run_i, meta_task, emb_type), header=T)
+      filename = sprintf("meta_results/run%i_%s_%s_embeddings.csv", run_i, meta_task, emb_type)
+      if (!file.exists(filename)) {
+        next 
+      }
+      this_d = read.csv(filename, header=T)
     }
     this_d$run = run_i
     this_d$meta_task = meta_task
@@ -121,22 +147,59 @@ for (meta_task in c("None", meta_tasks)) {
 ```
 
 ```{r}
-emb_matrix = emb_d %>%
-  filter(run == 0) %>% 
-  select(-run) %>%
-  gather(task, value, -c(dimension, meta_task)) %>%
-  unite(meta_and_task, meta_task, task) %>%
-  spread(meta_and_task, value) %>%
-  select(-dimension) %>%
-  as.matrix(.) %>%
-  t(.) %>%
-  dist(.) %>% 
-  as.matrix(.)
-
+classification_mapped = c("NOT_isAND", "NOT_isXOR", "NOT_isX0")
+mapping_mapped = c("ID_NOT", "NOT_ID", "NOT_NOT")
+emb_dist_d = data.frame()
+for (run_i in unique(emb_d$run)) {
+  emb_matrix = emb_d %>%
+    filter(run == run_i) %>% 
+    select(-run) %>%
+    gather(task, value, -c(dimension, meta_task)) %>%
+    unite(meta_and_task, meta_task, task) %>%
+    spread(meta_and_task, value) %>%
+    select(-dimension) %>%
+    as.matrix(.) %>%
+    dist(.) %>% 
+    as.matrix(.)
+  
+  # nrows = dim(emb_matrix)[1]
+  # ncols = dim(emb_matrix)[2]
+  # emb_matrix = emb_matrix * matrix(rep(1/sqrt(colSums(emb_matrix^2)), each=nrows), nrow=nrows, ncol=ncols)
+  # 
+  # emb_dist_matrix = t(emb_matrix) %*% emb_matrix
+  
+  for (mapped in classification_mapped) {
+    this_d = as.data.frame(emb_dist_matrix[mapped, c("None_NOT", "None_ID", "None_isAND", "None_isNOTAND", "None_isNOTX0", "None_isX0", "None_isXOR", "None_isNOTXOR", "None_isOR")])
+    names(this_d) = c("distance")
+    this_d$mapped = mapped
+    this_d$run = run_i
+    this_d$target =row.names(this_d)
+    emb_dist_d = bind_rows(emb_dist_d, this_d)
+  }
+  
+  for (mapped in mapping_mapped) {
+    this_d = as.data.frame(emb_dist_matrix[mapped, c("None_ID", "None_NOT", "ID_ID", "ID_NOT", "NOT_ID", "NOT_NOT")])
+    names(this_d) = c("distance")
+    this_d$mapped = mapped
+    this_d$run = run_i
+    this_d$target =row.names(this_d)
+    emb_dist_d = bind_rows(emb_dist_d, this_d)
+  }
+}
 ```
 
 ```{r}
-emb_matrix["NOT_NOT",]
+ggplot(emb_dist_d %>% filter(mapped %in% classification_mapped),
+       aes(x=target, fill=target, y=distance)) +
+  geom_bar(stat="identity") +
+  facet_grid(~mapped)
+```
+
+```{r}
+ggplot(emb_dist_d %>% filter(mapped %in% mapping_mapped),
+       aes(x=target, fill=target, y=distance)) +
+  geom_bar(stat="identity") +
+  facet_grid(~mapped)
 ```
 
 # meta-tasks
@@ -145,7 +208,11 @@ emb_matrix["NOT_NOT",]
 ```{r}
 meta_d = data.frame()
 for (run_i in 0:(nruns-1)) {
-  this_d = read.csv(sprintf("meta_results/run%i_new_meta_true_losses.csv", run_i), header=T)
+  filename = sprintf("meta_results/run%i_new_meta_true_losses.csv", run_i)
+  if (!file.exists(filename)) {
+    next 
+  }    
+  this_d = read.csv(filename, header=T)
   this_d$run = run_i
   this_d = this_d %>% 
     gather(mapping, loss, -c(run, epoch)) %>%
@@ -180,8 +247,9 @@ meta_bookend_summarized_d = meta_d %>%
 ggplot(data=meta_bookend_summarized_d %>% filter(time=="guess"), aes(x=meta_task, fill=condition, y=mean_loss)) +
   geom_bar(stat="identity", position="dodge") +
   geom_errorbar(aes(ymin=cilo, ymax=cihi), position="dodge") +
-  scale_fill_brewer(palette="Set2") +
-  geom_hline(yintercept=1.0, alpha=0.5, linetype=2) 
+  scale_fill_brewer(palette="Dark2") +
+  labs(x="New task", y="Mean proportion wrong") +
+  geom_hline(yintercept=0.5, alpha=0.5, linetype=2) 
 ```
 
 ```{r}
@@ -207,8 +275,9 @@ meta_bookend_d = meta_d %>%
 ggplot(data=meta_bookend_d %>% filter(time=="guess"), aes(x=original_task, fill=condition, y=mean_loss)) +
   geom_bar(stat="identity", position="dodge") +
   geom_errorbar(aes(ymin=cilo, ymax=cihi), position="dodge") +
-  scale_fill_brewer(palette="Set2") +
-  geom_hline(yintercept=1.0, alpha=0.5, linetype=2) +
+  scale_fill_brewer(palette="Dark2") +
+  geom_hline(yintercept=0.5, alpha=0.5, linetype=2) +
+  labs(x="New task", y="Proportion wrong") +
   facet_grid(~ meta_task) + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
