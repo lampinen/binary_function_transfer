@@ -444,8 +444,6 @@ class meta_model(object):
                     y_data.append(other_embedding)
         elif meta_task == "ID":
             for task in self.base_tasks: 
-                if task[:2] != "is": # restrict to only classification tasks
-                    continue
                 embedding = self.get_task_embedding(self.base_datasets[task])[0, :]
                 x_data.append(embedding)
                 y_data.append(embedding)
