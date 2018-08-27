@@ -152,9 +152,23 @@ def _get_dataset(task, num_input):
 
 class meta_model(object):
     """A meta-learning model for binary functions."""
-    def __init__(self, num_input, base_tasks, base_task_repeats, new_tasks):
+    def __init__(self, num_input, base_tasks, base_task_repeats, new_tasks,
+                 meta_two_level=True):
+        """args:
+            num_input: number of binary inputs
+            base_tasks: list of base binary functions to compute
+            base_task_repeats: how many times to repeat each task (must be <= 
+                num_input choose 2)
+            new_tasks: new tasks to test on
+            meta_two_level: If true, the meta tasks will be trained to make
+                mappings like NOT: isAND -> isNOTAND, which is a more abstract
+                sense of NOT than is implied by AND -> NOTAND (the most obvious
+                extension of this would be NOT: isAND -> NOTisAND). If false, 
+                meta tasks are only trained on base tasks.
+        """
         self.num_input = num_input
         self.num_output = num_output
+        self.meta_two_level = meta_two_level
 
         # base datasets
         self.base_tasks = []
@@ -431,29 +445,31 @@ class meta_model(object):
                     other = other_tasks[0]
                     x_data.append(self.get_task_embedding(self.base_datasets[task])[0, :])
                     y_data.append(self.get_task_embedding(self.base_datasets[other])[0, :])
-            for task in self.base_meta_tasks:
-                if task[:2] != "is": # restrict to only classification tasks
-                    continue
-                other = task[:2] + task[5:] if "NOT" in task else task[:2] + "NOT" + task[2:]
-                if other in self.base_meta_tasks:
-                    embedding = self.get_task_embedding(self.meta_dataset_cache[task], 
-                                                        base_input=False)[0, :]
-                    other_embedding = self.get_task_embedding(self.meta_dataset_cache[other], 
-                                                              base_input=False)[0, :]
-                    x_data.append(embedding)
-                    y_data.append(other_embedding)
+            if self.meta_two_level:
+                for task in self.base_meta_tasks:
+                    if task[:2] != "is": # restrict to only classification tasks
+                        continue
+                    other = task[:2] + task[5:] if "NOT" in task else task[:2] + "NOT" + task[2:]
+                    if other in self.base_meta_tasks:
+                        embedding = self.get_task_embedding(self.meta_dataset_cache[task], 
+                                                            base_input=False)[0, :]
+                        other_embedding = self.get_task_embedding(self.meta_dataset_cache[other], 
+                                                                  base_input=False)[0, :]
+                        x_data.append(embedding)
+                        y_data.append(other_embedding)
         elif meta_task == "ID":
             for task in self.base_tasks: 
                 embedding = self.get_task_embedding(self.base_datasets[task])[0, :]
                 x_data.append(embedding)
                 y_data.append(embedding)
-            for task in self.base_meta_tasks:
-                if task[:2] != "is": # restrict to only classification tasks
-                    continue
-                embedding = self.get_task_embedding(self.meta_dataset_cache[task], 
-                                                    base_input=False)[0, :]
-                x_data.append(embedding)
-                y_data.append(embedding)
+            if self.meta_two_level:
+                for task in self.base_meta_tasks:
+                    if task[:2] != "is": # restrict to only classification tasks
+                        continue
+                    embedding = self.get_task_embedding(self.meta_dataset_cache[task], 
+                                                        base_input=False)[0, :]
+                    x_data.append(embedding)
+                    y_data.append(embedding)
         elif meta_task[:2] == "is":
             pos_class = meta_task[2:]
             for task in self.base_tasks: 
@@ -803,30 +819,32 @@ class meta_model(object):
 ## running stuff
 
 for run_i in xrange(run_offset, run_offset+num_runs):
-    np.random.seed(run_i)
-    perm_list_dict = {task: (np.random.permutation(_get_perm_list_template(num_input)) if task not in ["XO", "NOTX0"] else np.random.permutation(_get_single_perm_list_template(num_input))) for task in total_tasks} 
-    tf.set_random_seed(run_i)
-    filename_prefix = "run%i" %(run_i)
-    print("Now running %s" % filename_prefix)
+    for meta_two_level in [True, False]: 
+        np.random.seed(run_i)
+        perm_list_dict = {task: (np.random.permutation(_get_perm_list_template(num_input)) if task not in ["XO", "NOTX0"] else np.random.permutation(_get_single_perm_list_template(num_input))) for task in total_tasks} 
+        tf.set_random_seed(run_i)
+        filename_prefix = "m2l%r_run%i" %(meta_two_level, run_i)
+        print("Now running %s" % filename_prefix)
 
-    model = meta_model(num_input, base_tasks, base_task_repeats, new_tasks) 
-    model.save_embeddings(filename=output_dir + filename_prefix + "_init_embeddings.csv")
-    model.train_base_tasks(filename=output_dir + filename_prefix + "_base_losses.csv")
-    model.save_embeddings(filename=output_dir + filename_prefix + "_guess_embeddings.csv")
-    for meta_task in base_meta_tasks:
-        if meta_task[:2] == "is": # not a true meta mapping
-            continue 
-        model.save_embeddings(filename=output_dir + filename_prefix + "_" + meta_task + "_guess_embeddings.csv",
-                              meta_task=meta_task)
+        model = meta_model(num_input, base_tasks, base_task_repeats, new_tasks,
+                           meta_two_level=meta_two_level) 
+        model.save_embeddings(filename=output_dir + filename_prefix + "_init_embeddings.csv")
+        model.train_base_tasks(filename=output_dir + filename_prefix + "_base_losses.csv")
+        model.save_embeddings(filename=output_dir + filename_prefix + "_guess_embeddings.csv")
+        for meta_task in base_meta_tasks:
+            if meta_task[:2] == "is": # not a true meta mapping
+                continue 
+            model.save_embeddings(filename=output_dir + filename_prefix + "_" + meta_task + "_guess_embeddings.csv",
+                                  meta_task=meta_task)
 
-    model.train_new_tasks(filename_prefix=output_dir + filename_prefix + "_new_")
-    model.save_embeddings(filename=output_dir + filename_prefix + "_final_embeddings.csv")
-    for meta_task in base_meta_tasks:
-        if meta_task[:2] == "is": # not a true meta mapping
-            continue 
-        model.save_embeddings(filename=output_dir + filename_prefix + "_" + meta_task + "_final_embeddings.csv",
-                              meta_task=meta_task)
+        model.train_new_tasks(filename_prefix=output_dir + filename_prefix + "_new_")
+        model.save_embeddings(filename=output_dir + filename_prefix + "_final_embeddings.csv")
+        for meta_task in base_meta_tasks:
+            if meta_task[:2] == "is": # not a true meta mapping
+                continue 
+            model.save_embeddings(filename=output_dir + filename_prefix + "_" + meta_task + "_final_embeddings.csv",
+                                  meta_task=meta_task)
 
 
-    tf.reset_default_graph()
+        tf.reset_default_graph()
 
