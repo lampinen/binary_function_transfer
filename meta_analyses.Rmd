@@ -74,6 +74,7 @@ ggplot(data=guess_summarized_d %>% filter(!(new_task %in% c("X0")), type == "gue
   geom_errorbar(aes(ymin=loss_ci_lo, ymax=loss_ci_hi), position="dodge", width=0.5) +
   scale_fill_brewer(palette="Dark2") +
   labs(x="New task", y="Proportion wrong") +
+  ylim(0, 1) +
   geom_hline(yintercept=0.5, alpha=0.5, linetype=2)
 ```
 ```{r}
@@ -85,6 +86,7 @@ ggplot(data=guess_summarized_d %>% filter(!(new_task %in% c("X0")), type == "tra
   geom_errorbar(aes(ymin=loss_ci_lo, ymax=loss_ci_hi), position="dodge", width=0.5) +
   scale_fill_brewer(palette="Dark2") +
   labs(x="New task", y="Proportion wrong") +
+  ylim(0, 1) +
   geom_hline(yintercept=0.5, alpha=0.5, linetype=2)
 ```
 ```{r}
@@ -147,8 +149,9 @@ for (meta_task in c("None", meta_mapping_tasks)) {
 ```
 
 ```{r}
-classification_mapped = c("NOT_isAND", "NOT_isXOR", "NOT_isX0")
-mapping_mapped = c("ID_NOT", "NOT_ID", "NOT_NOT")
+emb_mappings = c("None", "NOT", "ID")
+emb_classifications =  c("isAND", "isXOR", "isX0")
+emb_mappings_mapped =  c("NOT", "ID")
 emb_dist_d = data.frame()
 for (run_i in unique(emb_d$run)) {
   emb_matrix = emb_d %>%
@@ -158,48 +161,66 @@ for (run_i in unique(emb_d$run)) {
     unite(meta_and_task, meta_task, task) %>%
     spread(meta_and_task, value) %>%
     select(-dimension) %>%
-    as.matrix(.) %>%
-    dist(.) %>% 
-    as.matrix(.)
+    as.matrix(.) # %>%
+    # t(.) %>%
+    # dist(.) %>% 
+    # as.matrix(.)
   
-  # nrows = dim(emb_matrix)[1]
-  # ncols = dim(emb_matrix)[2]
-  # emb_matrix = emb_matrix * matrix(rep(1/sqrt(colSums(emb_matrix^2)), each=nrows), nrow=nrows, ncol=ncols)
-  # 
-  # emb_dist_matrix = t(emb_matrix) %*% emb_matrix
+   nrows = dim(emb_matrix)[1]
+   ncols = dim(emb_matrix)[2]
+   emb_matrix = emb_matrix * matrix(rep(1/sqrt(colSums(emb_matrix^2)), each=nrows), nrow=nrows, ncol=ncols)
+   
+   emb_dist_matrix = t(emb_matrix) %*% emb_matrix
   
-  for (mapped in classification_mapped) {
-    this_d = as.data.frame(emb_dist_matrix[mapped, c("None_NOT", "None_ID", "None_isAND", "None_isNOTAND", "None_isNOTX0", "None_isX0", "None_isXOR", "None_isNOTXOR", "None_isOR")])
-    names(this_d) = c("distance")
-    this_d$mapped = mapped
-    this_d$run = run_i
-    this_d$target =row.names(this_d)
-    emb_dist_d = bind_rows(emb_dist_d, this_d)
+  for (mapped in meta_classification_tasks) {
+    for (mapping in c("None", meta_mapping_tasks)) {
+      this_d = as.data.frame(emb_dist_matrix[paste(mapping, mapped, sep="_"), c("None_NOT", "None_ID", "None_isAND", "None_isNOTAND", "None_isNOTX0", "None_isX0", "None_isXOR", "None_isNOTXOR", "None_isOR")])
+      names(this_d) = c("distance")
+      this_d$mapping = mapping
+      this_d$mapped_task = mapped
+      this_d$run = run_i
+      this_d$target =row.names(this_d)
+      emb_dist_d = bind_rows(emb_dist_d, this_d)
+    }
   }
   
-  for (mapped in mapping_mapped) {
-    this_d = as.data.frame(emb_dist_matrix[mapped, c("None_ID", "None_NOT", "ID_ID", "ID_NOT", "NOT_ID", "NOT_NOT")])
-    names(this_d) = c("distance")
-    this_d$mapped = mapped
-    this_d$run = run_i
-    this_d$target =row.names(this_d)
-    emb_dist_d = bind_rows(emb_dist_d, this_d)
-  }
+   for (mapped in emb_mappings_mapped) {
+     this_d = as.data.frame(emb_dist_matrix[paste(mapping, mapped, sep="_"), c("None_ID", "None_NOT", "ID_ID", "ID_NOT", "NOT_ID", "NOT_NOT")])
+     names(this_d) = c("distance")
+     this_d$mapped = mapped
+     this_d$run = run_i
+     this_d$target =row.names(this_d)
+     emb_dist_d = bind_rows(emb_dist_d, this_d)
+   }
 }
 ```
 
 ```{r}
-ggplot(emb_dist_d %>% filter(mapped %in% classification_mapped),
-       aes(x=target, fill=target, y=distance)) +
-  geom_bar(stat="identity") +
-  facet_grid(~mapped)
+emb_dist_diff_d = emb_dist_d %>% 
+  spread(mapping, distance) %>%
+  mutate(delta_NOT = NOT-None,
+         delta_ID = ID-None,
+         delta_NOT_ID = NOT-ID) %>%
+  group_by(mapped_task, target) %>%
+  summarize(NOT = mean(NOT),
+            delta_NOT = mean(delta_NOT),
+            delta_ID= mean(delta_ID),
+            delta_NOT_ID = mean(delta_NOT_ID))
 ```
 
 ```{r}
-ggplot(emb_dist_d %>% filter(mapped %in% mapping_mapped),
-       aes(x=target, fill=target, y=distance)) +
+ggplot(emb_dist_diff_d %>% filter(mapped_task %in% emb_classifications),
+       aes(x=target, fill=target, y=delta_NOT)) +
   geom_bar(stat="identity") +
-  facet_grid(~mapped)
+  facet_grid(~mapped_task)
+```
+
+```{r}
+ ggplot(emb_dist_d %>% filter(mapped %in% emb_mappings_mapped,
+                              target %in% c("NOT_ID", "NOT_NOT")),
+        aes(x=target, fill=target, y=distance)) +
+   geom_bar(stat="identity") +
+   facet_grid(~mapped)
 ```
 
 # meta-tasks
@@ -249,6 +270,7 @@ ggplot(data=meta_bookend_summarized_d %>% filter(time=="guess"), aes(x=meta_task
   geom_errorbar(aes(ymin=cilo, ymax=cihi), position="dodge") +
   scale_fill_brewer(palette="Dark2") +
   labs(x="New task", y="Mean proportion wrong") +
+  ylim(0, 1) +
   geom_hline(yintercept=0.5, alpha=0.5, linetype=2) 
 ```
 
@@ -279,6 +301,7 @@ ggplot(data=meta_bookend_d %>% filter(time=="guess"), aes(x=original_task, fill=
   geom_hline(yintercept=0.5, alpha=0.5, linetype=2) +
   labs(x="New task", y="Proportion wrong") +
   facet_grid(~ meta_task) + 
+  ylim(0, 1) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
