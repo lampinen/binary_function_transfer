@@ -199,13 +199,16 @@ for (this_m2l in m2ls) {
     }
     
     for (mapped in emb_mappings_mapped) {
-      this_d = as.data.frame(emb_dist_matrix[paste(mapping, mapped, sep="_"), c("None_ID", "None_NOT", "ID_ID", "ID_NOT", "NOT_ID", "NOT_NOT")])
-      names(this_d) = c("distance")
-      this_d$mapped = mapped
-      this_d$run = run_i
-      this_d$m2l = this_m2l
-      this_d$target =row.names(this_d)
-      emb_dist_d = bind_rows(emb_dist_d, this_d)
+      for (mapping in c("None", meta_mapping_tasks)) {
+        this_d = as.data.frame(emb_dist_matrix[paste(mapping, mapped, sep="_"), c("None_ID", "None_NOT", "ID_ID", "ID_NOT", "NOT_ID", "NOT_NOT")])
+        names(this_d) = c("distance")
+        this_d$mapped_task = mapped
+        this_d$mapping = mapping
+        this_d$run = run_i
+        this_d$m2l = this_m2l
+        this_d$target =row.names(this_d)
+        emb_dist_d = bind_rows(emb_dist_d, this_d)
+      }
     }
   }
 }
@@ -232,11 +235,17 @@ ggplot(emb_dist_diff_d %>% filter(mapped_task %in% emb_classifications),
 ```
 
 ```{r}
- ggplot(emb_dist_d %>% filter(mapped %in% emb_mappings_mapped,
-                              target %in% c("NOT_ID", "NOT_NOT")),
+ ggplot(emb_dist_d %>% filter(mapped_task %in% emb_mappings_mapped,
+                              target %in% c("NOT_ID", "NOT_NOT")) %>%
+          group_by(m2l, mapping, mapped_task, target) %>%
+          summarize(se=sd(distance)/sqrt(n()),
+                    distance=mean(distance),
+                    ci_lo=distance - 1.96 * se,
+                    ci_hi=distance + 1.96 * se),
         aes(x=target, fill=target, y=distance)) +
    geom_bar(stat="identity") +
-   facet_grid(m2l~mapped)
+   geom_errorbar(aes(ymin=ci_lo, ymax=ci_hi), width = 0.25) +
+   facet_grid(m2l~  mapping + mapped_task)
 ```
 
 # meta-tasks
