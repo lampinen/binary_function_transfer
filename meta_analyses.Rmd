@@ -17,24 +17,28 @@ theme_set(theme_bw() +
 meta_mapping_tasks = c("ID", "NOT")
 meta_classification_tasks = c("isX0", "isNOTX0", "isAND", "isOR", "isNOTAND", "isXOR", "isNOTXOR")
 truly_new_tasks = c("NOTOR")
-nruns = 30
+nruns = 20
+m2ls = c("True", "False")
 ```
 
 ```{r}
 d = data.frame()
-for (run_i in 0:(nruns-1)) {
-  filename = sprintf("meta_results/run%i_new_new_losses.csv", run_i)
-  if (!file.exists(filename)) {
-    next
+for (m2l in m2ls) {
+  for (run_i in 0:(nruns-1)) {
+    filename = sprintf("meta_results/m2l%s_run%i_new_new_losses.csv", m2l, run_i)
+    if (!file.exists(filename)) {
+      next
+    }
+    this_d = read.csv(filename, header=T)
+    this_d$run = run_i
+    this_d$m2l = m2l
+    this_d = this_d %>% 
+      select(run, epoch, m2l, contains("new")) %>%
+      gather(new_task, loss, contains("new")) %>%
+      mutate(new_task=gsub("\\..*","",new_task))
+  
+    d = bind_rows(d, this_d)
   }
-  this_d = read.csv(filename, header=T)
-  this_d$run = run_i
-  this_d = this_d %>% 
-    select(run, epoch, contains("new")) %>%
-    gather(new_task, loss, contains("new")) %>%
-    mutate(new_task=gsub("\\..*","",new_task))
-
-  d = bind_rows(d, this_d)
 }
 ```
 
@@ -53,12 +57,12 @@ d = d %>%
 
 ```{r}
 guess_summarized_d = d %>%
-  group_by(new_task, condition, run) %>%
+  group_by(new_task, condition, m2l, run) %>%
   summarize(guess = head(loss, 1),
             trained = tail(loss, 1)) %>%
   ungroup() %>%
   gather(type, loss, guess, trained) %>%
-  group_by(new_task, condition, type) %>%
+  group_by(new_task, condition, m2l, type) %>%
   summarize(loss_sd = sd(loss),
             loss = mean(loss),
             loss_ci_lo = loss - 1.96 * loss_sd/sqrt(n()),
@@ -75,7 +79,8 @@ ggplot(data=guess_summarized_d %>% filter(!(new_task %in% c("X0")), type == "gue
   scale_fill_brewer(palette="Dark2") +
   labs(x="New task", y="Proportion wrong") +
   ylim(0, 1) +
-  geom_hline(yintercept=0.5, alpha=0.5, linetype=2)
+  geom_hline(yintercept=0.5, alpha=0.5, linetype=2) +
+  facet_grid(.~m2l)
 ```
 ```{r}
 ggsave("plots/meta/meta_res.png")
@@ -87,7 +92,8 @@ ggplot(data=guess_summarized_d %>% filter(!(new_task %in% c("X0")), type == "tra
   scale_fill_brewer(palette="Dark2") +
   labs(x="New task", y="Proportion wrong") +
   ylim(0, 1) +
-  geom_hline(yintercept=0.5, alpha=0.5, linetype=2)
+  geom_hline(yintercept=0.5, alpha=0.5, linetype=2) +
+  facet_grid( .  ~ m2l)
 ```
 ```{r}
 ggsave("plots/meta/meta_res_final.png")
@@ -96,54 +102,59 @@ ggsave("plots/meta/meta_res_final.png")
 
 ```{r}
 for (emb_type in c("guess", "final")) {
-  emb_d = data.frame()
-  for (run_i in 0:(nruns-1)) {
-    filename = sprintf("meta_results/run%i_%s_embeddings.csv", run_i, emb_type)
-    if (!file.exists(filename)) {
-      next
+  for (m2l in m2ls) {
+    emb_d = data.frame()
+    for (run_i in 0:(nruns-1)) {
+      filename = sprintf("meta_results/m2l%s_run%i_%s_embeddings.csv", m2l, run_i, emb_type)
+      if (!file.exists(filename)) {
+        next
+      }
+      this_d = read.csv(filename, header=T)
+      this_d$run = run_i
+      emb_d = bind_rows(emb_d, this_d)
     }
-    this_d = read.csv(filename, header=T)
-    this_d$run = run_i
-    emb_d = bind_rows(emb_d, this_d)
+    pcs = prcomp(emb_d %>% select(-dimension, -run, -one_of(meta_mapping_tasks), -one_of(meta_classification_tasks)), center=T, scale=T)
+    pc_d = data.frame(pcs$rotation)
+    pc_d$task = row.names(pc_d)
+    ggplot(pc_d, aes(x=PC1, y=PC2, color=task)) +
+      geom_point() +
+      geom_text(aes(label=task)) 
+    ggsave(sprintf("plots/meta/PCA_m2l%s_%s.png", m2l, emb_type), width=20, height=7)
+    pcs = prcomp(emb_d %>% select(-dimension, -run), center=T, scale=T)
+    pc_d = data.frame(pcs$rotation)
+    pc_d$task = row.names(pc_d)
+    ggplot(pc_d, aes(x=PC1, y=PC2, color=task)) +
+      geom_point() +
+      geom_text(aes(label=task)) 
+    ggsave(sprintf("plots/meta/PCA_full_m2l%s_%s.png", m2l, emb_type), width=20, height=7)
   }
-  pcs = prcomp(emb_d %>% select(-dimension, -run, -one_of(meta_mapping_tasks), -one_of(meta_classification_tasks)), center=T, scale=T)
-  pc_d = data.frame(pcs$rotation)
-  pc_d$task = row.names(pc_d)
-  ggplot(pc_d, aes(x=PC1, y=PC2, color=task)) +
-    geom_point() +
-    geom_text(aes(label=task)) 
-  ggsave(sprintf("plots/meta/PCA_%s.png", emb_type), width=20, height=7)
-  pcs = prcomp(emb_d %>% select(-dimension, -run), center=T, scale=T)
-  pc_d = data.frame(pcs$rotation)
-  pc_d$task = row.names(pc_d)
-  ggplot(pc_d, aes(x=PC1, y=PC2, color=task)) +
-    geom_point() +
-    geom_text(aes(label=task)) 
-  ggsave(sprintf("plots/meta/PCA_full_%s.png", emb_type), width=20, height=7)
 }
 ```
 
 ```{r}
 emb_type = "guess"
 emb_d = data.frame()
-for (meta_task in c("None", meta_mapping_tasks)) {
-  for (run_i in 0:(nruns-1)) {
-    if (meta_task == "None") {
-      filename = sprintf("meta_results/run%i_%s_embeddings.csv", run_i, emb_type)
-      if (!file.exists(filename)) {
-        next 
+for (m2l in m2ls) {
+  for (meta_task in c("None", meta_mapping_tasks)) {
+    for (run_i in 0:(nruns-1)) {
+      if (meta_task == "None") {
+        filename = sprintf("meta_results/m2l%s_run%i_%s_embeddings.csv", m2l, run_i, emb_type)
+        if (!file.exists(filename)) {
+          next 
+        }
+        this_d = read.csv(filename, header=T)
+      } else {
+        filename = sprintf("meta_results/m2l%s_run%i_%s_%s_embeddings.csv", m2l, run_i, meta_task, emb_type)
+        if (!file.exists(filename)) {
+          next 
+        }
+        this_d = read.csv(filename, header=T)
       }
-      this_d = read.csv(filename, header=T)
-    } else {
-      filename = sprintf("meta_results/run%i_%s_%s_embeddings.csv", run_i, meta_task, emb_type)
-      if (!file.exists(filename)) {
-        next 
-      }
-      this_d = read.csv(filename, header=T)
+      this_d$run = run_i
+      this_d$m2l = m2l
+      this_d$meta_task = meta_task
+      emb_d = bind_rows(emb_d, this_d)
     }
-    this_d$run = run_i
-    this_d$meta_task = meta_task
-    emb_d = bind_rows(emb_d, this_d)
   }
 }
 ```
@@ -153,45 +164,50 @@ emb_mappings = c("None", "NOT", "ID")
 emb_classifications =  c("isAND", "isXOR", "isX0")
 emb_mappings_mapped =  c("NOT", "ID")
 emb_dist_d = data.frame()
-for (run_i in unique(emb_d$run)) {
-  emb_matrix = emb_d %>%
-    filter(run == run_i) %>% 
-    select(-run) %>%
-    gather(task, value, -c(dimension, meta_task)) %>%
-    unite(meta_and_task, meta_task, task) %>%
-    spread(meta_and_task, value) %>%
-    select(-dimension) %>%
-    as.matrix(.) # %>%
-    # t(.) %>%
-    # dist(.) %>% 
-    # as.matrix(.)
-  
-   nrows = dim(emb_matrix)[1]
-   ncols = dim(emb_matrix)[2]
-   emb_matrix = emb_matrix * matrix(rep(1/sqrt(colSums(emb_matrix^2)), each=nrows), nrow=nrows, ncol=ncols)
-   
-   emb_dist_matrix = t(emb_matrix) %*% emb_matrix
-  
-  for (mapped in meta_classification_tasks) {
-    for (mapping in c("None", meta_mapping_tasks)) {
-      this_d = as.data.frame(emb_dist_matrix[paste(mapping, mapped, sep="_"), c("None_NOT", "None_ID", "None_isAND", "None_isNOTAND", "None_isNOTX0", "None_isX0", "None_isXOR", "None_isNOTXOR", "None_isOR")])
+for (this_m2l in m2ls) {
+  for (run_i in unique(emb_d$run)) {
+    emb_matrix = emb_d %>%
+      filter(run == run_i,
+             m2l == this_m2l) %>% 
+      select(-run, -m2l) %>%
+      gather(task, value, -c(dimension, meta_task)) %>%
+      unite(meta_and_task, meta_task, task) %>%
+      spread(meta_and_task, value) %>%
+      select(-dimension) %>%
+      as.matrix(.) # %>%
+      # t(.) %>%
+      # dist(.) %>% 
+      # as.matrix(.)
+    
+    nrows = dim(emb_matrix)[1]
+    ncols = dim(emb_matrix)[2]
+    emb_matrix = emb_matrix * matrix(rep(1/sqrt(colSums(emb_matrix^2)), each=nrows), nrow=nrows, ncol=ncols)
+    
+    emb_dist_matrix = t(emb_matrix) %*% emb_matrix
+    
+    for (mapped in meta_classification_tasks) {
+      for (mapping in c("None", meta_mapping_tasks)) {
+        this_d = as.data.frame(emb_dist_matrix[paste(mapping, mapped, sep="_"), c("None_NOT", "None_ID", "None_isAND", "None_isNOTAND", "None_isNOTX0", "None_isX0", "None_isXOR", "None_isNOTXOR", "None_isOR")])
+        names(this_d) = c("distance")
+        this_d$mapping = mapping
+        this_d$mapped_task = mapped
+        this_d$run = run_i
+        this_d$m2l = this_m2l
+        this_d$target =row.names(this_d)
+        emb_dist_d = bind_rows(emb_dist_d, this_d)
+      }
+    }
+    
+    for (mapped in emb_mappings_mapped) {
+      this_d = as.data.frame(emb_dist_matrix[paste(mapping, mapped, sep="_"), c("None_ID", "None_NOT", "ID_ID", "ID_NOT", "NOT_ID", "NOT_NOT")])
       names(this_d) = c("distance")
-      this_d$mapping = mapping
-      this_d$mapped_task = mapped
+      this_d$mapped = mapped
       this_d$run = run_i
+      this_d$m2l = this_m2l
       this_d$target =row.names(this_d)
       emb_dist_d = bind_rows(emb_dist_d, this_d)
     }
   }
-  
-   for (mapped in emb_mappings_mapped) {
-     this_d = as.data.frame(emb_dist_matrix[paste(mapping, mapped, sep="_"), c("None_ID", "None_NOT", "ID_ID", "ID_NOT", "NOT_ID", "NOT_NOT")])
-     names(this_d) = c("distance")
-     this_d$mapped = mapped
-     this_d$run = run_i
-     this_d$target =row.names(this_d)
-     emb_dist_d = bind_rows(emb_dist_d, this_d)
-   }
 }
 ```
 
@@ -201,7 +217,7 @@ emb_dist_diff_d = emb_dist_d %>%
   mutate(delta_NOT = NOT-None,
          delta_ID = ID-None,
          delta_NOT_ID = NOT-ID) %>%
-  group_by(mapped_task, target) %>%
+  group_by(m2l, mapped_task, target) %>%
   summarize(NOT = mean(NOT),
             delta_NOT = mean(delta_NOT),
             delta_ID= mean(delta_ID),
@@ -212,7 +228,7 @@ emb_dist_diff_d = emb_dist_d %>%
 ggplot(emb_dist_diff_d %>% filter(mapped_task %in% emb_classifications),
        aes(x=target, fill=target, y=delta_NOT)) +
   geom_bar(stat="identity") +
-  facet_grid(~mapped_task)
+  facet_grid(m2l~mapped_task)
 ```
 
 ```{r}
@@ -220,7 +236,7 @@ ggplot(emb_dist_diff_d %>% filter(mapped_task %in% emb_classifications),
                               target %in% c("NOT_ID", "NOT_NOT")),
         aes(x=target, fill=target, y=distance)) +
    geom_bar(stat="identity") +
-   facet_grid(~mapped)
+   facet_grid(m2l~mapped)
 ```
 
 # meta-tasks
@@ -228,35 +244,38 @@ ggplot(emb_dist_diff_d %>% filter(mapped_task %in% emb_classifications),
 
 ```{r}
 meta_d = data.frame()
-for (run_i in 0:(nruns-1)) {
-  filename = sprintf("meta_results/run%i_new_meta_true_losses.csv", run_i)
-  if (!file.exists(filename)) {
-    next 
-  }    
-  this_d = read.csv(filename, header=T)
-  this_d$run = run_i
-  this_d = this_d %>% 
-    gather(mapping, loss, -c(run, epoch)) %>%
-    mutate(is_new = grepl("new", mapping),
-           is_truly_new = task_truly_new(mapping),
-           condition = ifelse(is_truly_new, "completely_new",
-                       ifelse(is_new, "new_application",
-                              "old"))) %>%
-    separate(mapping, c("meta_task", "original_task", "relevant"), sep="\\.", extra="drop")
-
-  meta_d = bind_rows(meta_d, this_d)
+for (m2l in m2ls) {
+  for (run_i in 0:(nruns-1)) {
+    filename = sprintf("meta_results/m2l%s_run%i_new_meta_true_losses.csv", m2l, run_i)
+    if (!file.exists(filename)) {
+      next 
+    }    
+    this_d = read.csv(filename, header=T)
+    this_d$run = run_i
+    this_d$m2l = m2l
+    this_d = this_d %>% 
+      gather(mapping, loss, -c(run, m2l, epoch)) %>%
+      mutate(is_new = grepl("new", mapping),
+             is_truly_new = task_truly_new(mapping),
+             condition = ifelse(is_truly_new, "completely_new",
+                         ifelse(is_new, "new_application",
+                                "old"))) %>%
+      separate(mapping, c("meta_task", "original_task", "relevant"), sep="\\.", extra="drop")
+  
+    meta_d = bind_rows(meta_d, this_d)
+  }
 }
 ```
 
 ```{r}
 meta_bookend_summarized_d = meta_d %>%
 #  filter(original_task != "XOR") %>%
-  group_by(run) %>%
+  group_by(run, m2l) %>%
   filter(epoch == 0 | epoch == max(epoch)) %>%
   ungroup() %>%
   mutate(time=ifelse(epoch==0, "guess", "final")) %>%
   select(-epoch) %>%
-  group_by(time, meta_task, condition) %>%
+  group_by(time, m2l, meta_task, condition) %>%
   summarize(mean_loss = mean(loss),
             se_loss = sd(loss)/sqrt(n())) %>%
   ungroup() %>%
@@ -271,7 +290,8 @@ ggplot(data=meta_bookend_summarized_d %>% filter(time=="guess"), aes(x=meta_task
   scale_fill_brewer(palette="Dark2") +
   labs(x="New task", y="Mean proportion wrong") +
   ylim(0, 1) +
-  geom_hline(yintercept=0.5, alpha=0.5, linetype=2) 
+  geom_hline(yintercept=0.5, alpha=0.5, linetype=2) +
+  facet_grid(. ~ m2l)
 ```
 
 ```{r}
@@ -280,12 +300,12 @@ ggsave("plots/meta/meta_guess_performance_summarized.png")
 
 ```{r}
 meta_bookend_d = meta_d %>%
-  group_by(run) %>%
+  group_by(run, m2l) %>%
   filter(epoch == 0 | epoch == max(epoch)) %>%
   ungroup() %>%
   mutate(time=ifelse(epoch==0, "guess", "final")) %>%
   select(-epoch) %>%
-  group_by(time, meta_task, original_task, condition) %>%
+  group_by(m2l, time, meta_task, original_task, condition) %>%
   summarize(mean_loss = mean(loss),
             se_loss = sd(loss)/sqrt(n())) %>%
   ungroup() %>%
@@ -300,13 +320,12 @@ ggplot(data=meta_bookend_d %>% filter(time=="guess"), aes(x=original_task, fill=
   scale_fill_brewer(palette="Dark2") +
   geom_hline(yintercept=0.5, alpha=0.5, linetype=2) +
   labs(x="New task", y="Proportion wrong") +
-  facet_grid(~ meta_task) + 
+  facet_grid(m2l ~ meta_task) + 
   ylim(0, 1) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
 ```{r}
-
 ggsave("plots/meta/meta_guess_performance.png")
 ```
 
