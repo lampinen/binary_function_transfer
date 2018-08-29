@@ -836,10 +836,10 @@ class meta_model(object):
                                                                      base_output=base_output)
 
             if meta_task is not None:
-		meta_dataset = self.get_meta_dataset(meta_task)
-		task_embeddings = self.get_outputs(meta_dataset,
-						   {"x": task_embeddings},
-						   base_input=False,
+                meta_dataset = self.get_meta_dataset(meta_task)
+                task_embeddings = self.get_outputs(meta_dataset,
+                                                   {"x": task_embeddings},
+                                                   base_input=False,
                                                    base_output=False)
 
             for i in range(num_hidden_hyper):
@@ -847,7 +847,7 @@ class meta_model(object):
                 
 ## running stuff
 
-for run_i in xrange(run_offset, run_offset+num_runs):
+for run_i in range(run_offset, run_offset+num_runs):
     for meta_two_level in [True, False]: 
         np.random.seed(run_i)
         perm_list_dict = {task: (np.random.permutation(_get_perm_list_template(num_input)) if task not in ["XO", "NOTX0"] else np.random.permutation(_get_single_perm_list_template(num_input))) for task in total_tasks} 
