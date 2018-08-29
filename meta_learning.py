@@ -30,8 +30,8 @@ refresh_meta_cache_every = 1 # how many epochs between updates to meta_dataset_c
 train_momentum = 0.8
 adam_epsilon = 1e-3
 
-max_base_epochs = 1#2500 
-max_new_epochs = 1#200
+max_base_epochs = 2500 
+max_new_epochs = 200
 num_task_hidden_layers = 3
 num_meta_hidden_layers = 3
 output_dir = "meta_results/"
