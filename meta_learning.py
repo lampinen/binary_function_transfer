@@ -861,17 +861,13 @@ for run_i in range(run_offset, run_offset+num_runs):
         model.save_embeddings(filename=output_dir + filename_prefix + "_init_embeddings.csv")
         model.train_base_tasks(filename=output_dir + filename_prefix + "_base_losses.csv")
         model.save_embeddings(filename=output_dir + filename_prefix + "_guess_embeddings.csv")
-        for meta_task in base_meta_tasks:
-            if meta_task[:2] == "is": # not a true meta mapping
-                continue 
+        for meta_task in base_meta_mappings:
             model.save_embeddings(filename=output_dir + filename_prefix + "_" + meta_task + "_guess_embeddings.csv",
                                   meta_task=meta_task)
 
         model.train_new_tasks(filename_prefix=output_dir + filename_prefix + "_new_")
         model.save_embeddings(filename=output_dir + filename_prefix + "_final_embeddings.csv")
-        for meta_task in base_meta_tasks:
-            if meta_task[:2] == "is": # not a true meta mapping
-                continue 
+        for meta_task in base_meta_mappings:
             model.save_embeddings(filename=output_dir + filename_prefix + "_" + meta_task + "_final_embeddings.csv",
                                   meta_task=meta_task)
 
