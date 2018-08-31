@@ -47,7 +47,7 @@ meta_batch_size = 196 # how much of each dataset the function embedding guesser 
 early_stopping_thresh = 0.005
 base_tasks = ["X0", "NOTX0", "AND", "NOTAND", "OR", "XOR", "NOTXOR"]
 base_meta_tasks = ["isX0", "isNOTX0", "isAND", "isNOTAND", "isOR", "isXOR", "isNOTXOR"]
-base_meta_mappings = ["ID", "NOT", "A2O"]
+base_meta_mappings = ["ID", "NOT", "A2O", "NOTA2O"]
 base_task_repeats = 27 # how many times each base task is seen
 new_tasks = ["X0", "AND", "OR", "NOTOR", "NOTAND", "XOR", "NOTXOR"]
 ###
@@ -152,15 +152,16 @@ def _get_dataset(task, num_input):
     return dataset 
 
 
-def _get_meta_mappings(this_base_tasks, this_base_meta_tasks, this_new_tasks=None, meta_two_level=False, include_new=False):
+def _get_meta_mappings(this_base_tasks, this_base_meta_tasks, this_base_meta_mappings, this_new_tasks=None, meta_two_level=False, include_new=False):
     """Gets which tasks map to which other tasks under the meta_tasks (i.e. the
     part of the meta datasets which is precomputable)"""
-    meta_mappings = {meta_task: {"base": [], "meta": []} for meta_task in this_base_meta_tasks}
+    all_meta_tasks = this_base_meta_tasks + this_base_meta_mappings
+    meta_mappings = {meta_task: {"base": [], "meta": []} for meta_task in all_meta_tasks}
     if include_new:
         basic_tasks = this_base_tasks + this_new_tasks
     else:
         basic_tasks = this_base_tasks
-    for meta_task in this_base_meta_tasks:
+    for meta_task in all_meta_tasks:
         if meta_task == "NOT":
             for task in basic_tasks: 
                 stripped_task = ";".join(task.split(";")[:-1])
@@ -171,8 +172,6 @@ def _get_meta_mappings(this_base_tasks, this_base_meta_tasks, this_new_tasks=Non
                     meta_mappings[meta_task]["base"].append((task, other))
             if meta_two_level:
                 for task in this_base_meta_tasks:
-                    if task[:2] != "is": # restrict to only classification tasks
-                        continue
                     other = task[:2] + task[5:] if "NOT" in task else task[:2] + "NOT" + task[2:]
                     if other in this_base_meta_tasks:
                         meta_mappings[meta_task]["meta"].append((task, other))
@@ -196,8 +195,6 @@ def _get_meta_mappings(this_base_tasks, this_base_meta_tasks, this_new_tasks=Non
 
             if meta_two_level:
                 for task in this_base_meta_tasks:
-                    if task[:2] != "is": # restrict to only classification tasks
-                        continue
                     if "XOR" in task:
                         other = task[:2] + task[5:] if "NOT" in task else task[:2] + "NOT" + task[2:]
                     elif "OR" in task:
@@ -210,13 +207,47 @@ def _get_meta_mappings(this_base_tasks, this_base_meta_tasks, this_new_tasks=Non
 
                     if other in this_base_meta_tasks:
                         meta_mappings[meta_task]["meta"].append((task, other))
+        elif meta_task == "NOTA2O":
+            for task in basic_tasks: 
+                stripped_task = ";".join(task.split(";")[:-1])
+                if "XOR" in stripped_task:
+                    meta_mappings[meta_task]["base"].append((task, task))
+                    continue
+                elif "OR" in stripped_task:
+                    other = "AND" + stripped_task[5:] if task[:3] == "NOT" else "NOTAND" + stripped_task[2:]
+                elif "AND" in stripped_task:
+                    other = "OR" + stripped_task[6:] if task[:3] == "NOT" else "NOTOR" + stripped_task[3:]
+                elif "X0" in stripped_task:
+                    other = stripped_task[3:] if task[:3] == "NOT" else "NOT" + stripped_task
+                else: 
+                    raise ValueError("Unknown base task for NOTA2O" + task)
+                    
+                other_tasks = [t for t in basic_tasks if ";".join(t.split(";")[:-1]) == other]
+                if other_tasks != []:
+                    other = other_tasks[0]
+                    meta_mappings[meta_task]["base"].append((task, other))
+
+            if meta_two_level:
+                for task in this_base_meta_tasks:
+                    if "XOR" in task:
+                        meta_mappings[meta_task]["meta"].append((task, task))
+                        continue
+                    elif "OR" in task:
+                        other = "isAND" if task[2:5] == "NOT" else "isNOTAND"
+                    elif "AND" in task:
+                        other = "isOR" if task[2:5] == "NOT" else "isNOTOR"
+                    elif "X0" in task:
+                        other = "isX0" if task[2:5] == "NOT" else "isNOTX0"
+                    else: 
+                        raise ValueError("Unknown meta task for NOTA2O: " + task)
+
+                    if other in this_base_meta_tasks:
+                        meta_mappings[meta_task]["meta"].append((task, other))
         elif meta_task == "ID":
             for task in basic_tasks: 
                 meta_mappings[meta_task]["base"].append((task, task))
             if meta_two_level:
                 for task in this_base_meta_tasks:
-                    if task[:2] != "is": # restrict to only classification tasks
-                        continue
                     meta_mappings[meta_task]["meta"].append((task, task))
         elif meta_task[:2] == "is":
             pos_class = meta_task[2:]
@@ -279,12 +310,12 @@ class meta_model(object):
         self.task_to_index = dict(zip(self.all_tasks, range(num_tasks)))
 
         self.meta_mappings_base = _get_meta_mappings(
-            self.base_tasks, self.all_meta_tasks,
+            self.base_tasks, self.base_meta_tasks, self.base_meta_mappings,
             meta_two_level=meta_two_level)
 
         self.meta_mappings_full = _get_meta_mappings(
-            self.base_tasks, self.all_meta_tasks, self.new_tasks,
-            meta_two_level=meta_two_level, include_new=True)
+            self.base_tasks, self.base_meta_tasks, self.base_meta_mappings,
+            self.new_tasks, meta_two_level=meta_two_level, include_new=True)
 
         # network
         self.is_base_input = tf.placeholder_with_default(True, []) # whether is base input 
