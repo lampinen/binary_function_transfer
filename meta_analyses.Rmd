@@ -14,10 +14,10 @@ theme_set(theme_bw() +
 ```
 
 ```{r}
-meta_mapping_tasks = c("ID", "NOT")
+meta_mapping_tasks = c("ID", "NOT", "A2O")
 meta_classification_tasks = c("isX0", "isNOTX0", "isAND", "isOR", "isNOTAND", "isXOR", "isNOTXOR")
 truly_new_tasks = c("NOTOR")
-nruns = 20
+nruns = 10
 m2ls = c("True", "False")
 ```
 
@@ -140,12 +140,14 @@ for (m2l in m2ls) {
       if (meta_task == "None") {
         filename = sprintf("meta_results/m2l%s_run%i_%s_embeddings.csv", m2l, run_i, emb_type)
         if (!file.exists(filename)) {
+#          print(paste("Skipping", filename, sep=" "))
           next 
         }
         this_d = read.csv(filename, header=T)
       } else {
         filename = sprintf("meta_results/m2l%s_run%i_%s_%s_embeddings.csv", m2l, run_i, meta_task, emb_type)
         if (!file.exists(filename)) {
+#          print(paste("Skipping", filename, sep=" "))
           next 
         }
         this_d = read.csv(filename, header=T)
@@ -162,7 +164,7 @@ for (m2l in m2ls) {
 ```{r}
 emb_mappings = c("None", "NOT", "ID")
 emb_classifications =  c("isAND", "isXOR", "isX0")
-emb_mappings_mapped =  c("NOT", "ID")
+emb_mappings_mapped =  c("NOT", "ID", "A2O")
 emb_dist_d = data.frame()
 for (this_m2l in m2ls) {
   for (run_i in unique(emb_d$run)) {
@@ -187,7 +189,7 @@ for (this_m2l in m2ls) {
     
     for (mapped in meta_classification_tasks) {
       for (mapping in c("None", meta_mapping_tasks)) {
-        this_d = as.data.frame(emb_dist_matrix[paste(mapping, mapped, sep="_"), c("None_NOT", "None_ID", "None_isAND", "None_isNOTAND", "None_isNOTX0", "None_isX0", "None_isXOR", "None_isNOTXOR", "None_isOR")])
+        this_d = as.data.frame(emb_dist_matrix[paste(mapping, mapped, sep="_"), c("None_NOT", "None_ID", "None_A2O", "None_isAND", "None_isNOTAND", "None_isNOTX0", "None_isX0", "None_isXOR", "None_isNOTXOR", "None_isOR")])
         names(this_d) = c("distance")
         this_d$mapping = mapping
         this_d$mapped_task = mapped
@@ -200,7 +202,7 @@ for (this_m2l in m2ls) {
     
     for (mapped in emb_mappings_mapped) {
       for (mapping in c("None", meta_mapping_tasks)) {
-        this_d = as.data.frame(emb_dist_matrix[paste(mapping, mapped, sep="_"), c("None_ID", "None_NOT", "ID_ID", "ID_NOT", "NOT_ID", "NOT_NOT")])
+        this_d = as.data.frame(emb_dist_matrix[paste(mapping, mapped, sep="_"), c("None_ID", "None_NOT", "None_A2O", "ID_ID", "ID_NOT", "ID_A2O", "NOT_ID", "NOT_NOT", "NOT_A2O")])
         names(this_d) = c("distance")
         this_d$mapped_task = mapped
         this_d$mapping = mapping
