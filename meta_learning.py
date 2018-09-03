@@ -21,16 +21,16 @@ init_learning_rate = 1e-4
 init_meta_learning_rate = 1e-4
 new_init_learning_rate = 1e-6
 new_init_meta_learning_rate = 1e-6
-lr_decay = 0.8
-meta_lr_decay = 0.8
+lr_decay = 0.85
+meta_lr_decay = 0.85
 lr_decays_every = 100
-min_learning_rate = 1e-7
+min_learning_rate = 1e-6
 refresh_meta_cache_every = 1 # how many epochs between updates to meta_dataset_cache
 
-train_momentum = 0.8
-adam_epsilon = 1e-3
+#train_momentum = 0.8
+#adam_epsilon = 1e-3
 
-max_base_epochs = 2500 
+max_base_epochs = 3500 
 max_new_epochs = 200
 num_task_hidden_layers = 3
 num_meta_hidden_layers = 3
