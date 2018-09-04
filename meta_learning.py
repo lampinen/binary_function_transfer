@@ -16,7 +16,7 @@ num_input = 9
 num_output = 1 # cannot be changed without somewhat substantial code modifications
 num_hidden = 64
 num_hidden_hyper = 64
-num_runs = 10 
+num_runs = 5 
 run_offset = 0
 init_learning_rate = 1e-4
 init_meta_learning_rate = 1e-4
@@ -31,7 +31,7 @@ refresh_meta_cache_every = 1 # how many epochs between updates to meta_dataset_c
 #train_momentum = 0.8
 #adam_epsilon = 1e-3
 
-max_base_epochs = 2500 
+max_base_epochs = 4000 
 max_new_epochs = 200
 num_task_hidden_layers = 3
 num_meta_hidden_layers = 3
@@ -40,6 +40,7 @@ save_every = 10 #20
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 cue_dimensions = True # if true, provide two-hot cues of which dimensions are relevant
 base_hard_eval = True # eval on accuracy on thresholded values, which is bounded and more interpretable than XE loss.
+save_input_embeddings = False # whether to save full input embeddings -- is pretty space expensive
 hyper_convolutional = False # whether hyper network creates weights convolutionally
 conv_in_channels = 6
 
@@ -366,9 +367,11 @@ class meta_model(object):
         processed_input = tf.cond(self.is_base_input,
             lambda: processed_input,
             lambda: self.meta_input_ph)
+        self.processed_input = processed_input
         processed_targets = tf.cond(self.is_base_output,
             lambda: processed_targets,
             lambda: self.meta_target_ph)
+        self.processed_targets = processed_targets
         
         # function embedding "guessing" network 
         self.guess_input_mask_ph = tf.placeholder(tf.bool, shape=[None]) # which datapoints get excluded from the guess
@@ -934,6 +937,41 @@ class meta_model(object):
 
             for i in range(num_hidden_hyper):
                 fout.write(("%i, " %i) + (format_string % tuple(task_embeddings[:, i])))
+
+
+    def save_input_embeddings(self, filename):
+        """Saves embeddings of all possible inputs."""
+        raw_data, _ = datasets.X0_dataset(num_input)
+        if tf_pm:
+            raw_data = 2*raw_data - 1
+        names = [("%i" * num_input) % tuple(raw_data[i, :]) for i in range(len(raw_data))]
+        format_string = ", ".join(["%f" for _ in names]) + "\n"
+        with open(filename, "w") as fout:
+            fout.write("dimension, x0, x1, " + ", ".join(names) + "\n")
+            for perm in _get_perm_list_template(num_input):
+                this_perm = np.array(perm)
+                x_data = raw_data.copy()
+                x0 = np.where(this_perm == 0)[0] # index of X0 in permuted data
+                x1 = np.where(this_perm == 1)[0]
+
+                x_data = x_data[:, this_perm] 
+                
+                if cue_dimensions:
+                    cue_data = np.zeros_like(x_data)
+                    cue_data[:, [x0, x1]] = 1.
+                    x_data = np.concatenate([x_data, cue_data], axis=-1)
+
+                input_embeddings = self.sess.run(self.processed_input,
+                                                 feed_dict = {
+                                                     self.base_input_ph: x_data,
+                                                     self.is_base_input: True,
+                                                     self.base_target_ph: self.dummy_base_output,
+                                                     self.meta_input_ph: self.dummy_meta_input,
+                                                     self.meta_target_ph: self.dummy_meta_output
+                                                     })
+                
+                for i in range(num_hidden_hyper):
+                    fout.write(("%i, %i, %i, " %(i, x0, x1)) + (format_string % tuple(input_embeddings[:, i])))
                 
 ## running stuff
 
@@ -954,6 +992,8 @@ for run_i in range(run_offset, run_offset+num_runs):
 #        exit()
         model.train_base_tasks(filename=output_dir + filename_prefix + "_base_losses.csv")
         model.save_embeddings(filename=output_dir + filename_prefix + "_guess_embeddings.csv")
+        if save_input_embeddings:
+            model.save_input_embeddings(filename=output_dir + filename_prefix + "_guess_input_embeddings.csv")
         for meta_task in base_meta_mappings:
             model.save_embeddings(filename=output_dir + filename_prefix + "_" + meta_task + "_guess_embeddings.csv",
                                   meta_task=meta_task)
