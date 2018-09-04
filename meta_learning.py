@@ -2,6 +2,7 @@ from __future__ import print_function
 from __future__ import absolute_import
 from __future__ import division
 
+#import cProfile
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
@@ -11,7 +12,7 @@ from orthogonal_matrices import random_orthogonal
 
 pi = np.pi
 ### Parameters
-num_input = 8
+num_input = 9
 num_output = 1 # cannot be changed without somewhat substantial code modifications
 num_hidden = 64
 num_hidden_hyper = 64
@@ -42,14 +43,14 @@ base_hard_eval = True # eval on accuracy on thresholded values, which is bounded
 hyper_convolutional = False # whether hyper network creates weights convolutionally
 conv_in_channels = 6
 
-batch_size = 256
-meta_batch_size = 196 # how much of each dataset the function embedding guesser sees 
+batch_size = 512
+meta_batch_size = 384 # how much of each dataset the function embedding guesser sees 
 early_stopping_thresh = 0.005
 base_tasks = ["X0", "NOTX0", "AND", "NOTAND", "OR", "XOR", "NOTXOR"]
 base_meta_tasks = ["isX0", "isNOTX0", "isAND", "isNOTAND", "isOR", "isXOR", "isNOTXOR"]
 new_meta_tasks = ["isNOTOR"]
 base_meta_mappings = ["ID", "NOT", "A2O", "NOTA2O"]
-base_task_repeats = 27 # how many times each base task is seen
+base_task_repeats = 35 # how many times each base task is seen
 new_tasks = ["X0", "AND", "OR", "NOTOR", "NOTAND", "XOR", "NOTXOR"]
 ###
 var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1., mode='FAN_AVG')
@@ -494,7 +495,9 @@ class meta_model(object):
 
 
         # initialize
-        self.sess = tf.Session()
+        sess_config = tf.ConfigProto()
+        sess_config.gpu_options.allow_growth = True
+        self.sess = tf.Session(config=sess_config)
         self.sess.run(tf.global_variables_initializer())
         self.refresh_meta_dataset_cache()
         
@@ -946,6 +949,9 @@ for run_i in range(run_offset, run_offset+num_runs):
                            base_meta_tasks, base_meta_mappings, new_meta_tasks,
                            meta_two_level=meta_two_level) 
         model.save_embeddings(filename=output_dir + filename_prefix + "_init_embeddings.csv")
+
+#        cProfile.run('model.train_base_tasks(filename=output_dir + filename_prefix + "_base_losses.csv")')
+#        exit()
         model.train_base_tasks(filename=output_dir + filename_prefix + "_base_losses.csv")
         model.save_embeddings(filename=output_dir + filename_prefix + "_guess_embeddings.csv")
         for meta_task in base_meta_mappings:
