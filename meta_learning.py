@@ -155,7 +155,7 @@ def _get_dataset(task, num_input):
     return dataset 
 
 
-def _get_meta_mappings(this_base_tasks, this_base_meta_tasks, this_base_meta_mappings, this_new_tasks=None, meta_two_level=False, include_new=False):
+def _get_meta_mappings(this_base_tasks, this_base_meta_tasks, this_base_meta_mappings, this_new_tasks=None, include_new=False):
     """Gets which tasks map to which other tasks under the meta_tasks (i.e. the
     part of the meta datasets which is precomputable)"""
     all_base_meta_tasks = this_base_meta_tasks + this_base_meta_mappings
@@ -173,11 +173,10 @@ def _get_meta_mappings(this_base_tasks, this_base_meta_tasks, this_base_meta_map
                 if other_tasks != []:
                     other = other_tasks[0]
                     meta_mappings[meta_task]["base"].append((task, other))
-            if meta_two_level:
-                for task in this_base_meta_tasks:
-                    other = task[:2] + task[5:] if "NOT" in task else task[:2] + "NOT" + task[2:]
-                    if other in this_base_meta_tasks:
-                        meta_mappings[meta_task]["meta"].append((task, other))
+            for task in this_base_meta_tasks:
+                other = task[:2] + task[5:] if "NOT" in task else task[:2] + "NOT" + task[2:]
+                if other in this_base_meta_tasks:
+                    meta_mappings[meta_task]["meta"].append((task, other))
         elif meta_task == "A2O":
             for task in basic_tasks: 
                 stripped_task = ";".join(task.split(";")[:-1])
@@ -196,20 +195,19 @@ def _get_meta_mappings(this_base_tasks, this_base_meta_tasks, this_base_meta_map
                     other = other_tasks[0]
                     meta_mappings[meta_task]["base"].append((task, other))
 
-            if meta_two_level:
-                for task in this_base_meta_tasks:
-                    if "XOR" in task:
-                        other = task[:2] + task[5:] if "NOT" in task else task[:2] + "NOT" + task[2:]
-                    elif "OR" in task:
-                        other = "isNOTAND" if task[2:5] == "NOT" else "isAND"
-                    elif "AND" in task:
-                        other = "isNOTOR" if task[2:5] == "NOT" else "isOR"
-                    else: # identity on all other tasks
-                        meta_mappings[meta_task]["meta"].append((task, task))
-                        continue
+            for task in this_base_meta_tasks:
+                if "XOR" in task:
+                    other = task[:2] + task[5:] if "NOT" in task else task[:2] + "NOT" + task[2:]
+                elif "OR" in task:
+                    other = "isNOTAND" if task[2:5] == "NOT" else "isAND"
+                elif "AND" in task:
+                    other = "isNOTOR" if task[2:5] == "NOT" else "isOR"
+                else: # identity on all other tasks
+                    meta_mappings[meta_task]["meta"].append((task, task))
+                    continue
 
-                    if other in this_base_meta_tasks:
-                        meta_mappings[meta_task]["meta"].append((task, other))
+                if other in this_base_meta_tasks:
+                    meta_mappings[meta_task]["meta"].append((task, other))
         elif meta_task == "NOTA2O":
             for task in basic_tasks: 
                 stripped_task = ";".join(task.split(";")[:-1])
@@ -230,28 +228,26 @@ def _get_meta_mappings(this_base_tasks, this_base_meta_tasks, this_base_meta_map
                     other = other_tasks[0]
                     meta_mappings[meta_task]["base"].append((task, other))
 
-            if meta_two_level:
-                for task in this_base_meta_tasks:
-                    if "XOR" in task:
-                        meta_mappings[meta_task]["meta"].append((task, task))
-                        continue
-                    elif "OR" in task:
-                        other = "isAND" if task[2:5] == "NOT" else "isNOTAND"
-                    elif "AND" in task:
-                        other = "isOR" if task[2:5] == "NOT" else "isNOTOR"
-                    elif "X0" in task:
-                        other = "isX0" if task[2:5] == "NOT" else "isNOTX0"
-                    else: 
-                        raise ValueError("Unknown meta task for NOTA2O: " + task)
+            for task in this_base_meta_tasks:
+                if "XOR" in task:
+                    meta_mappings[meta_task]["meta"].append((task, task))
+                    continue
+                elif "OR" in task:
+                    other = "isAND" if task[2:5] == "NOT" else "isNOTAND"
+                elif "AND" in task:
+                    other = "isOR" if task[2:5] == "NOT" else "isNOTOR"
+                elif "X0" in task:
+                    other = "isX0" if task[2:5] == "NOT" else "isNOTX0"
+                else: 
+                    raise ValueError("Unknown meta task for NOTA2O: " + task)
 
-                    if other in this_base_meta_tasks:
-                        meta_mappings[meta_task]["meta"].append((task, other))
+                if other in this_base_meta_tasks:
+                    meta_mappings[meta_task]["meta"].append((task, other))
         elif meta_task == "ID":
             for task in basic_tasks: 
                 meta_mappings[meta_task]["base"].append((task, task))
-            if meta_two_level:
-                for task in this_base_meta_tasks:
-                    meta_mappings[meta_task]["meta"].append((task, task))
+            for task in this_base_meta_tasks:
+                meta_mappings[meta_task]["meta"].append((task, task))
         elif meta_task[:2] == "is":
             pos_class = meta_task[2:]
             for task in basic_tasks: 
@@ -317,13 +313,12 @@ class meta_model(object):
         self.task_to_index = dict(zip(self.all_tasks, range(num_tasks)))
 
         self.meta_mappings_base = _get_meta_mappings(
-            self.base_tasks, self.base_meta_tasks, self.base_meta_mappings,
-            meta_two_level=meta_two_level)
+            self.base_tasks, self.base_meta_tasks, self.base_meta_mappings)
 
         self.meta_mappings_full = _get_meta_mappings(
             self.base_tasks, self.base_meta_tasks + self.new_meta_tasks,
             self.base_meta_mappings, self.new_tasks,
-            meta_two_level=meta_two_level, include_new=True)
+            include_new=True)
 
         # network
         self.is_base_input = tf.placeholder_with_default(True, []) # whether is base input 
@@ -564,7 +559,8 @@ class meta_model(object):
         return loss
         
 
-    def get_meta_dataset(self, meta_task, include_new=False):
+    def get_meta_dataset(self, meta_task, include_new=False, override_m2l=False):
+        """override_m2l is used to allow meta mapped class. even if not trained on it"""
         x_data = []
         y_data = []
         if include_new:
@@ -581,13 +577,14 @@ class meta_model(object):
             else:
                 other_dataset = self.base_datasets[other] if other in self.base_tasks else self.new_datasets[other]
                 y_data.append(self.get_task_embedding(other_dataset)[0, :])
-        for (task, other) in this_meta_tasks:
-            embedding = self.get_task_embedding(self.meta_dataset_cache[task], 
-                                                base_input=False)[0, :]
-            other_embedding = self.get_task_embedding(self.meta_dataset_cache[other], 
-                                                      base_input=False)[0, :]
-            x_data.append(embedding)
-            y_data.append(other_embedding)
+        if self.meta_two_level or override_m2l:
+            for (task, other) in this_meta_tasks:
+                embedding = self.get_task_embedding(self.meta_dataset_cache[task], 
+                                                    base_input=False)[0, :]
+                other_embedding = self.get_task_embedding(self.meta_dataset_cache[other], 
+                                                          base_input=False)[0, :]
+                x_data.append(embedding)
+                y_data.append(other_embedding)
         return {"x": np.array(x_data), "y": np.array(y_data)}
 
 
@@ -628,7 +625,8 @@ class meta_model(object):
         losses = []
         names = []
         for meta_task in self.base_meta_mappings:
-            meta_dataset = self.get_meta_dataset(meta_task, include_new=True)
+            meta_dataset = self.get_meta_dataset(meta_task, include_new=True,
+                                                 override_m2l=True)
             for task, other in self.meta_mappings_full[meta_task]["meta"]:
                 task_dataset = self.get_meta_dataset(task, include_new=True)
 
