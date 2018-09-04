@@ -30,7 +30,7 @@ refresh_meta_cache_every = 1 # how many epochs between updates to meta_dataset_c
 #train_momentum = 0.8
 #adam_epsilon = 1e-3
 
-max_base_epochs = 3500 
+max_base_epochs = 2500 
 max_new_epochs = 200
 num_task_hidden_layers = 3
 num_meta_hidden_layers = 3
@@ -47,6 +47,7 @@ meta_batch_size = 196 # how much of each dataset the function embedding guesser 
 early_stopping_thresh = 0.005
 base_tasks = ["X0", "NOTX0", "AND", "NOTAND", "OR", "XOR", "NOTXOR"]
 base_meta_tasks = ["isX0", "isNOTX0", "isAND", "isNOTAND", "isOR", "isXOR", "isNOTXOR"]
+new_meta_tasks = ["isNOTOR"]
 base_meta_mappings = ["ID", "NOT", "A2O", "NOTA2O"]
 base_task_repeats = 27 # how many times each base task is seen
 new_tasks = ["X0", "AND", "OR", "NOTOR", "NOTAND", "XOR", "NOTXOR"]
@@ -155,13 +156,13 @@ def _get_dataset(task, num_input):
 def _get_meta_mappings(this_base_tasks, this_base_meta_tasks, this_base_meta_mappings, this_new_tasks=None, meta_two_level=False, include_new=False):
     """Gets which tasks map to which other tasks under the meta_tasks (i.e. the
     part of the meta datasets which is precomputable)"""
-    all_meta_tasks = this_base_meta_tasks + this_base_meta_mappings
-    meta_mappings = {meta_task: {"base": [], "meta": []} for meta_task in all_meta_tasks}
+    all_base_meta_tasks = this_base_meta_tasks + this_base_meta_mappings
+    meta_mappings = {meta_task: {"base": [], "meta": []} for meta_task in all_base_meta_tasks}
     if include_new:
         basic_tasks = this_base_tasks + this_new_tasks
     else:
         basic_tasks = this_base_tasks
-    for meta_task in all_meta_tasks:
+    for meta_task in all_base_meta_tasks:
         if meta_task == "NOT":
             for task in basic_tasks: 
                 stripped_task = ";".join(task.split(";")[:-1])
@@ -261,14 +262,18 @@ def _get_meta_mappings(this_base_tasks, this_base_meta_tasks, this_base_meta_map
 class meta_model(object):
     """A meta-learning model for binary functions."""
     def __init__(self, num_input, base_tasks, base_task_repeats, new_tasks,
-                 base_meta_tasks, base_meta_mappings,
+                 base_meta_tasks, base_meta_mappings, new_meta_tasks,
                  meta_two_level=True):
         """args:
             num_input: number of binary inputs
             base_tasks: list of base binary functions to compute
+            base_meta_tasks: tasks whose domain is functions but range is not
+            base_meta_mappings: tasks whose domain AND range are both function
+                embeddings
             base_task_repeats: how many times to repeat each task (must be <= 
                 num_input choose 2)
             new_tasks: new tasks to test on
+            new_meta_tasks: new meta tasks
             meta_two_level: If true, the meta tasks will be trained to make
                 mappings like NOT: isAND -> isNOTAND, which is a more abstract
                 sense of NOT than is implied by AND -> NOTAND (the most obvious
@@ -291,11 +296,11 @@ class meta_model(object):
 
         self.base_meta_tasks = base_meta_tasks 
         self.base_meta_mappings = base_meta_mappings
-        self.all_meta_tasks = base_meta_tasks + base_meta_mappings
-        self.meta_dataset_cache = {t: {} for t in self.all_meta_tasks} # will cache datasets for a certain number of epochs
-                                                                       # both to speed training and to keep training targets
-                                                                       # consistent
-
+        self.all_base_meta_tasks = base_meta_tasks + base_meta_mappings
+        self.new_meta_tasks = new_meta_tasks 
+        self.meta_dataset_cache = {t: {} for t in self.all_base_meta_tasks + self.new_meta_tasks} # will cache datasets for a certain number of epochs
+                                                                                                  # both to speed training and to keep training targets
+                                                                                                  # consistent
         # new datasets
         self.new_tasks = []
         self.new_datasets = {}
@@ -305,7 +310,7 @@ class meta_model(object):
             self.new_datasets[task_full_name] = dataset
             self.new_tasks.append(task_full_name) 
 
-        self.all_tasks = self.base_tasks + self.new_tasks + self.all_meta_tasks
+        self.all_tasks = self.base_tasks + self.new_tasks + self.all_base_meta_tasks
         self.num_tasks = num_tasks = len(self.all_tasks)
         self.task_to_index = dict(zip(self.all_tasks, range(num_tasks)))
 
@@ -314,8 +319,9 @@ class meta_model(object):
             meta_two_level=meta_two_level)
 
         self.meta_mappings_full = _get_meta_mappings(
-            self.base_tasks, self.base_meta_tasks, self.base_meta_mappings,
-            self.new_tasks, meta_two_level=meta_two_level, include_new=True)
+            self.base_tasks, self.base_meta_tasks + self.new_meta_tasks,
+            self.base_meta_mappings, self.new_tasks,
+            meta_two_level=meta_two_level, include_new=True)
 
         # network
         self.is_base_input = tf.placeholder_with_default(True, []) # whether is base input 
@@ -552,16 +558,24 @@ class meta_model(object):
         return loss
         
 
-    def get_meta_dataset(self, meta_task):
+    def get_meta_dataset(self, meta_task, include_new=False):
         x_data = []
         y_data = []
-        for (task, other) in self.meta_mappings_base[meta_task]["base"]:
-            x_data.append(self.get_task_embedding(self.base_datasets[task])[0, :])
+        if include_new:
+            this_base_tasks = self.meta_mappings_full[meta_task]["base"]
+            this_meta_tasks = self.meta_mappings_full[meta_task]["meta"]
+        else:
+            this_base_tasks = self.meta_mappings_base[meta_task]["base"]
+            this_meta_tasks = self.meta_mappings_base[meta_task]["meta"]
+        for (task, other) in this_base_tasks:
+            task_dataset = self.base_datasets[task] if task in self.base_tasks else self.new_datasets[task]
+            x_data.append(self.get_task_embedding(task_dataset)[0, :])
             if other in [0, 1]:  # for classification meta tasks
                 y_data.append(other)
             else:
-                y_data.append(self.get_task_embedding(self.base_datasets[other])[0, :])
-        for (task, other) in self.meta_mappings_base[meta_task]["meta"]:
+                other_dataset = self.base_datasets[other] if other in self.base_tasks else self.new_datasets[other]
+                y_data.append(self.get_task_embedding(other_dataset)[0, :])
+        for (task, other) in this_meta_tasks:
             embedding = self.get_task_embedding(self.meta_dataset_cache[task], 
                                                 base_input=False)[0, :]
             other_embedding = self.get_task_embedding(self.meta_dataset_cache[other], 
@@ -602,15 +616,43 @@ class meta_model(object):
         return losses, names
 
 
+    def meta_mapped_classification_true_eval(self):
+        """Evaluates true meta loss of classification embeddings output 
+           by the embedding output by the meta mapping tasks"""
+        losses = []
+        names = []
+        for meta_task in self.base_meta_mappings:
+            meta_dataset = self.get_meta_dataset(meta_task, include_new=True)
+            for task, other in self.meta_mappings_full[meta_task]["meta"]:
+                task_dataset = self.get_meta_dataset(task, include_new=True)
+
+                task_embedding = self.get_task_embedding(task_dataset,
+                                                         base_input=False)
+
+                dataset = self.get_meta_dataset(other, include_new=True)
+
+                mapped_embedding = self.get_outputs(meta_dataset,
+                                                    {"x": task_embedding},
+                                                    base_input=False,
+                                                    base_output=False)
+
+                names.append(meta_task + ":" + task + "->" + other)
+                losses.append(
+                    self.dataset_embedding_eval(dataset, mapped_embedding,
+                                                base_input=False))
+
+        return losses, names
+
+
     def base_eval(self):
         """Evaluates loss on the base tasks."""
-        losses = np.zeros([len(self.base_tasks) + len(self.all_meta_tasks)])
+        losses = np.zeros([len(self.base_tasks) + len(self.all_base_meta_tasks)])
         for task in self.base_tasks:
             dataset =  self.base_datasets[task]
             losses[self.task_to_index[task]] = self.dataset_eval(dataset)
 
         offset = len(self.new_tasks) # new come before meta in indices
-        for task in self.all_meta_tasks:
+        for task in self.all_base_meta_tasks:
             dataset = self.meta_dataset_cache[task]
             losses[self.task_to_index[task] - offset] = self.dataset_eval(dataset,
                                                                           base_input=False, 
@@ -637,7 +679,7 @@ class meta_model(object):
             dataset =  self.new_datasets[task]
             losses[self.task_to_index[task]] = self.dataset_eval(dataset)
 
-        for task in self.all_meta_tasks:
+        for task in self.all_base_meta_tasks:
             dataset = self.meta_dataset_cache[task]
             losses[self.task_to_index[task]] = self.dataset_eval(dataset,
                                                                  base_input=False,
@@ -690,8 +732,8 @@ class meta_model(object):
     def train_base_tasks(self, filename):
         """Train model to perform base tasks as meta task."""
         with open(filename, "w") as fout:
-            fout.write("epoch, " + ", ".join(self.base_tasks + self.all_meta_tasks) + "\n")
-            format_string = ", ".join(["%f" for _ in self.base_tasks + self.all_meta_tasks]) + "\n"
+            fout.write("epoch, " + ", ".join(self.base_tasks + self.all_base_meta_tasks) + "\n")
+            format_string = ", ".join(["%f" for _ in self.base_tasks + self.all_base_meta_tasks]) + "\n"
 
             learning_rate = init_learning_rate
             meta_learning_rate = init_meta_learning_rate
@@ -707,9 +749,9 @@ class meta_model(object):
                     dataset =  self.base_datasets[task]
                     self.dataset_train_step(dataset, learning_rate)
 
-                order = np.random.permutation(len(self.all_meta_tasks))
+                order = np.random.permutation(len(self.all_base_meta_tasks))
                 for task_i in order:
-                    task = self.all_meta_tasks[task_i]
+                    task = self.all_base_meta_tasks[task_i]
                     dataset =  self.meta_dataset_cache[task]
                     self.dataset_train_step(dataset, meta_learning_rate, 
                                             base_output=len(dataset["y"].shape) == 1,
@@ -731,11 +773,14 @@ class meta_model(object):
                     meta_learning_rate *= meta_lr_decay
 
 
-    def refresh_meta_dataset_cache(self):
+    def refresh_meta_dataset_cache(self, refresh_new=False):
         for task in self.base_meta_tasks:
             self.meta_dataset_cache[task] = self.get_meta_dataset(task)
         for task in self.base_meta_mappings:
             self.meta_dataset_cache[task] = self.get_meta_dataset(task)
+        if refresh_new:
+            for task in self.new_meta_tasks:
+                self.meta_dataset_cache[task] = self.get_meta_dataset(task, include_new=True)
 
 
     def train_new_tasks(self, filename_prefix):
@@ -743,78 +788,89 @@ class meta_model(object):
 
         with open(filename_prefix + "new_losses.csv", "w") as fout:
             with open(filename_prefix + "meta_true_losses.csv", "w") as fout_meta:
-                fout.write("epoch, " + ", ".join(self.all_tasks) + "\n")
-                format_string = ", ".join(["%f" for _ in self.all_tasks]) + "\n"
+                with open(filename_prefix + "meta_mapped_classification_true_losses.csv", "w") as fout_meta2:
+                    fout.write("epoch, " + ", ".join(self.all_tasks) + "\n")
+                    format_string = ", ".join(["%f" for _ in self.all_tasks]) + "\n"
 
-                for new_task in self.new_tasks:
-                    dataset = self.new_datasets[new_task]
-                    with open(filename_prefix + new_task + "_outputs.csv", "w") as foutputs:
-                        foutputs.write("type, " + ', '.join(["input%i" % i for i in range(len(dataset["y"]))]) + "\n")
-                        foutputs.write("target, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(dataset["y"].flatten()) + "\n")
+                    for new_task in self.new_tasks:
+                        dataset = self.new_datasets[new_task]
+                        with open(filename_prefix + new_task + "_outputs.csv", "w") as foutputs:
+                            foutputs.write("type, " + ', '.join(["input%i" % i for i in range(len(dataset["y"]))]) + "\n")
+                            foutputs.write("target, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(dataset["y"].flatten()) + "\n")
 
-                        curr_net_outputs = self.new_outputs(new_task, zeros=True)
-                        foutputs.write("baseline, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(curr_net_outputs) + "\n")
-                        curr_net_outputs = self.new_outputs(new_task, zeros=False)
-                        foutputs.write("guess_emb, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(curr_net_outputs) + "\n")
+                            curr_net_outputs = self.new_outputs(new_task, zeros=True)
+                            foutputs.write("baseline, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(curr_net_outputs) + "\n")
+                            curr_net_outputs = self.new_outputs(new_task, zeros=False)
+                            foutputs.write("guess_emb, " + ', '.join(["%f" for i in range(len(dataset["y"]))]) % tuple(curr_net_outputs) + "\n")
 
-                self.refresh_meta_dataset_cache()
+                    self.refresh_meta_dataset_cache(refresh_new=True)
 
-                curr_meta_true_losses, meta_true_names = self.meta_true_eval() 
-                fout_meta.write("epoch, " + ", ".join(meta_true_names) + "\n")
-                meta_format_string = ", ".join(["%f" for _ in meta_true_names]) + "\n"
-                curr_meta_output = ("0, ") + (meta_format_string % tuple(curr_meta_true_losses))
-                fout_meta.write(curr_meta_output)
+                    curr_meta_true_losses, meta_true_names = self.meta_true_eval() 
+                    fout_meta.write("epoch, " + ", ".join(meta_true_names) + "\n")
+                    meta_format_string = ", ".join(["%f" for _ in meta_true_names]) + "\n"
+                    curr_meta_output = ("0, ") + (meta_format_string % tuple(curr_meta_true_losses))
+                    fout_meta.write(curr_meta_output)
 
-                curr_losses = self.all_eval() # guess embedding 
-                print(len(curr_losses))
-                curr_output = ("0, ") + (format_string % tuple(curr_losses))
-                fout.write(curr_output)
-                print(curr_output)
+                    curr_meta2_true_losses, meta2_true_names = self.meta_mapped_classification_true_eval() 
+                    fout_meta2.write("epoch, " + ", ".join(meta2_true_names) + "\n")
+                    meta2_format_string = ", ".join(["%f" for _ in meta2_true_names]) + "\n"
+                    curr_meta2_output = ("0, ") + (meta2_format_string % tuple(curr_meta2_true_losses))
+                    fout_meta2.write(curr_meta2_output)
 
-                # now tune
-                learning_rate = new_init_learning_rate
-                meta_learning_rate = new_init_meta_learning_rate
-                for epoch in range(1, max_new_epochs):
-                    if epoch % refresh_meta_cache_every == 0:
-                        self.refresh_meta_dataset_cache()
+                    curr_losses = self.all_eval() # guess embedding 
+                    print(len(curr_losses))
+                    curr_output = ("0, ") + (format_string % tuple(curr_losses))
+                    fout.write(curr_output)
+                    print(curr_output)
 
-                    order = np.random.permutation(self.num_tasks)
-                    for task_i in order:
-                        task = self.all_tasks[task_i]
-                        base_input=True
-                        base_output=True
-                        this_lr = learning_rate
-                        if task in self.new_tasks:
-                            dataset =  self.new_datasets[task]
-                        elif task in self.all_meta_tasks:
-                            dataset = self.meta_dataset_cache[task]
-                            base_input=False
-                            base_output=len(dataset["y"].shape) == 1
-                            this_lr = meta_learning_rate
-                        else:
-                            dataset =  self.base_datasets[task]
-                        self.dataset_train_step(dataset, learning_rate, 
-                                                base_input=base_input,
-                                                base_output=base_output)
+                    # now tune
+                    learning_rate = new_init_learning_rate
+                    meta_learning_rate = new_init_meta_learning_rate
+                    for epoch in range(1, max_new_epochs):
+                        if epoch % refresh_meta_cache_every == 0:
+                            self.refresh_meta_dataset_cache(refresh_new=True)
 
-                    if epoch % save_every == 0:
-                        curr_meta_true_losses, _ = self.meta_true_eval() 
-                        curr_meta_output = ("%i, " % epoch) + (meta_format_string % tuple(curr_meta_true_losses))
-                        fout_meta.write(curr_meta_output)
+                        order = np.random.permutation(self.num_tasks)
+                        for task_i in order:
+                            task = self.all_tasks[task_i]
+                            base_input=True
+                            base_output=True
+                            this_lr = learning_rate
+                            if task in self.new_tasks:
+                                dataset =  self.new_datasets[task]
+                            elif task in self.all_base_meta_tasks:
+                                dataset = self.meta_dataset_cache[task]
+                                base_input=False
+                                base_output=len(dataset["y"].shape) == 1
+                                this_lr = meta_learning_rate
+                            else:
+                                dataset =  self.base_datasets[task]
+                            self.dataset_train_step(dataset, learning_rate, 
+                                                    base_input=base_input,
+                                                    base_output=base_output)
 
-                        curr_losses = self.all_eval()
-                        curr_output = ("%i, " % epoch) + (format_string % tuple(curr_losses))
-                        fout.write(curr_output)
-                        print(curr_output)
-                        if np.all(curr_losses < early_stopping_thresh):
-                            print("Early stop new!")
-                            break
+                        if epoch % save_every == 0:
+                            curr_meta_true_losses, _ = self.meta_true_eval() 
+                            curr_meta_output = ("%i, " % epoch) + (meta_format_string % tuple(curr_meta_true_losses))
+                            fout_meta.write(curr_meta_output)
 
-                    if epoch % lr_decays_every == 0 and epoch > 0 and learning_rate > min_learning_rate:
-                        learning_rate *= lr_decay
+                            curr_meta2_true_losses, _ = self.meta_mapped_classification_true_eval() 
+                            curr_meta2_output = ("%i, " % epoch) + (meta2_format_string % tuple(curr_meta2_true_losses))
+                            fout_meta2.write(curr_meta2_output)
 
-                    if epoch % lr_decays_every == 0 and epoch > 0 and meta_learning_rate > min_learning_rate:
-                        meta_learning_rate *= meta_lr_decay
+                            curr_losses = self.all_eval()
+                            curr_output = ("%i, " % epoch) + (format_string % tuple(curr_losses))
+                            fout.write(curr_output)
+                            print(curr_output)
+                            if np.all(curr_losses < early_stopping_thresh):
+                                print("Early stop new!")
+                                break
+
+                        if epoch % lr_decays_every == 0 and epoch > 0 and learning_rate > min_learning_rate:
+                            learning_rate *= lr_decay
+
+                        if epoch % lr_decays_every == 0 and epoch > 0 and meta_learning_rate > min_learning_rate:
+                            meta_learning_rate *= meta_lr_decay
 
         for new_task in self.new_tasks:
             with open(filename_prefix + new_task + "_outputs.csv", "a") as foutputs:
@@ -846,7 +902,7 @@ class meta_model(object):
         with open(filename, "w") as fout:
             basic_tasks = self.base_tasks + self.new_tasks
             simplified_tasks = [_simplify(t) for t in basic_tasks]
-            fout.write("dimension, " + ", ".join(simplified_tasks + self.all_meta_tasks) + "\n")
+            fout.write("dimension, " + ", ".join(simplified_tasks + self.all_base_meta_tasks) + "\n")
             format_string = ", ".join(["%f" for _ in self.all_tasks]) + "\n"
             task_embeddings = np.zeros([len(self.all_tasks), num_hidden_hyper])
 
@@ -887,7 +943,7 @@ for run_i in range(run_offset, run_offset+num_runs):
         print("Now running %s" % filename_prefix)
 
         model = meta_model(num_input, base_tasks, base_task_repeats, new_tasks,
-                           base_meta_tasks, base_meta_mappings,
+                           base_meta_tasks, base_meta_mappings, new_meta_tasks,
                            meta_two_level=meta_two_level) 
         model.save_embeddings(filename=output_dir + filename_prefix + "_init_embeddings.csv")
         model.train_base_tasks(filename=output_dir + filename_prefix + "_base_losses.csv")
