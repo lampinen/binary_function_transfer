@@ -16,8 +16,9 @@ theme_set(theme_bw() +
 ```{r}
 meta_mapping_tasks = c("ID", "NOT", "A2O")
 meta_classification_tasks = c("isX0", "isNOTX0", "isAND", "isOR", "isNOTAND", "isXOR", "isNOTXOR")
+new_meta_class_tasks = c("isNOTOR")
 truly_new_tasks = c("NOTOR")
-nruns = 10
+nruns = 2
 m2ls = c("True", "False")
 ```
 
@@ -47,6 +48,12 @@ task_truly_new =  function(tasks) {
   return(any(vapply(truly_new_tasks, function(x) grepl(x, tasks), T)))
 } 
 task_truly_new = Vectorize(task_truly_new)
+
+
+classification_truly_new =  function(classifications) {
+  return(any(vapply(new_meta_class_tasks, function(x) grepl(x, classifications), T)))
+} 
+classification_truly_new = Vectorize(classification_truly_new)
 ```
 
 ```{r}
@@ -162,9 +169,9 @@ for (m2l in m2ls) {
 ```
 
 ```{r}
-emb_mappings = c("None", "NOT", "ID")
+emb_mappings = c("None", "NOT", "ID", "A2O")#, "NOTA2O")
 emb_classifications =  c("isAND", "isXOR", "isX0")
-emb_mappings_mapped =  c("NOT", "ID", "A2O")
+emb_mappings_mapped =  c("NOT", "ID", "A2O")#, "NOTA2O")
 emb_dist_d = data.frame()
 for (this_m2l in m2ls) {
   for (run_i in unique(emb_d$run)) {
@@ -176,16 +183,18 @@ for (this_m2l in m2ls) {
       unite(meta_and_task, meta_task, task) %>%
       spread(meta_and_task, value) %>%
       select(-dimension) %>%
-      as.matrix(.) # %>%
-      # t(.) %>%
-      # dist(.) %>% 
-      # as.matrix(.)
+      as.matrix(.) %>%
+      t(.) %>%
+      dist(.) %>% 
+      as.matrix(.)
     
-    nrows = dim(emb_matrix)[1]
-    ncols = dim(emb_matrix)[2]
-    emb_matrix = emb_matrix * matrix(rep(1/sqrt(colSums(emb_matrix^2)), each=nrows), nrow=nrows, ncol=ncols)
-    
-    emb_dist_matrix = t(emb_matrix) %*% emb_matrix
+#    nrows = dim(emb_matrix)[1]
+#    ncols = dim(emb_matrix)[2]
+#    emb_matrix = emb_matrix * matrix(rep(1/sqrt(colSums(emb_matrix^2)), each=nrows), nrow=nrows, ncol=ncols)
+#    
+#    emb_dist_matrix = t(emb_matrix) %*% emb_matrix
+      
+    emb_dist_matrix = emb_matrix
     
     for (mapped in meta_classification_tasks) {
       for (mapping in c("None", meta_mapping_tasks)) {
@@ -237,8 +246,10 @@ ggplot(emb_dist_diff_d %>% filter(mapped_task %in% emb_classifications),
 ```
 
 ```{r}
+for (this_m2l in m2ls) {
  ggplot(emb_dist_d %>% filter(mapped_task %in% emb_mappings_mapped,
-                              target %in% c("NOT_ID", "NOT_NOT")) %>%
+                              m2l == this_m2l,
+                              target %in% c("NOT_ID", "NOT_NOT", "NOT_A2O", "NOT_NOTA2O")) %>%
           group_by(m2l, mapping, mapped_task, target) %>%
           summarize(se=sd(distance)/sqrt(n()),
                     distance=mean(distance),
@@ -247,7 +258,9 @@ ggplot(emb_dist_diff_d %>% filter(mapped_task %in% emb_classifications),
         aes(x=target, fill=target, y=distance)) +
    geom_bar(stat="identity") +
    geom_errorbar(aes(ymin=ci_lo, ymax=ci_hi), width = 0.25) +
-   facet_grid(m2l~  mapping + mapped_task)
+   facet_grid(m2l + mapping~ mapped_task)
+  ggsave(sprintf("plots/meta/meta_mapping_similarity_m2l%s.png", this_m2l), width=20, height=15)
+}
 ```
 
 # meta-tasks
@@ -255,6 +268,7 @@ ggplot(emb_dist_diff_d %>% filter(mapped_task %in% emb_classifications),
 
 ```{r}
 meta_d = data.frame()
+meta_class_d = data.frame()
 for (m2l in m2ls) {
   for (run_i in 0:(nruns-1)) {
     filename = sprintf("meta_results/m2l%s_run%i_new_meta_true_losses.csv", m2l, run_i)
@@ -274,6 +288,24 @@ for (m2l in m2ls) {
       separate(mapping, c("meta_task", "original_task", "relevant"), sep="\\.", extra="drop")
   
     meta_d = bind_rows(meta_d, this_d)
+    
+    # now meta class d
+    filename = sprintf("meta_results/m2l%s_run%i_new_meta_mapped_classification_true_losses.csv", m2l, run_i)
+    if (!file.exists(filename)) {
+      next 
+    }    
+    this_d = read.csv(filename, header=T)
+    this_d$run = run_i
+    this_d$m2l = m2l
+    this_d = this_d %>% 
+      gather(mapping, loss, -c(run, m2l, epoch)) %>%
+      mutate(is_truly_new = classification_truly_new(mapping),
+             condition = ifelse(is_truly_new, "completely_new",
+                                "old")) %>%
+      separate(mapping, c("meta_task", "original_task", "relevant"), sep="\\.", extra="drop")
+  
+    meta_class_d = bind_rows(meta_class_d, this_d)
+    
   }
 }
 ```
@@ -340,3 +372,33 @@ ggplot(data=meta_bookend_d %>% filter(time=="guess"), aes(x=original_task, fill=
 ggsave("plots/meta/meta_guess_performance.png")
 ```
 
+# meta-mapping for new meta classification
+
+```{r}
+meta_class_bookend_summarized_d = meta_class_d %>%
+  filter(m2l == "True") %>% # TODO: remove after bug in m2l False runs is fixed
+  group_by(run, m2l) %>%
+  filter(epoch == 0 | epoch == max(epoch)) %>%
+  ungroup() %>%
+  mutate(time=ifelse(epoch==0, "guess", "final")) %>%
+  select(-epoch) %>%
+  group_by(time, m2l, meta_task, condition) %>%
+  summarize(mean_loss = mean(loss),
+            se_loss = sd(loss)/sqrt(n())) %>%
+  ungroup() %>%
+  mutate(cihi=mean_loss + 1.96*se_loss, 
+         cilo=mean_loss - 1.96*se_loss)
+```
+
+
+```{r}
+ggplot(data=meta_class_bookend_summarized_d %>% filter(time=="guess"), aes(x=meta_task, fill=condition, y=mean_loss)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_errorbar(aes(ymin=cilo, ymax=cihi), position="dodge") +
+  scale_fill_brewer(palette="Dark2") +
+  labs(x="New task", y="Mean proportion wrong") +
+  ylim(0, 1) +
+  geom_hline(yintercept=0.5, alpha=0.5, linetype=2) +
+  facet_grid(. ~ m2l)
+  
+```
