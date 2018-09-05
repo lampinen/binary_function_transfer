@@ -14,11 +14,11 @@ theme_set(theme_bw() +
 ```
 
 ```{r}
-meta_mapping_tasks = c("ID", "NOT", "A2O")
+meta_mapping_tasks = c("ID", "NOT", "A2O", "NOTA2O")
 meta_classification_tasks = c("isX0", "isNOTX0", "isAND", "isOR", "isNOTAND", "isXOR", "isNOTXOR")
 new_meta_class_tasks = c("isNOTOR")
 truly_new_tasks = c("NOTOR")
-nruns = 2
+nruns = 4
 m2ls = c("True", "False")
 ```
 
@@ -239,10 +239,10 @@ emb_dist_diff_d = emb_dist_d %>%
 ```
 
 ```{r}
-ggplot(emb_dist_diff_d %>% filter(mapped_task %in% emb_classifications),
-       aes(x=target, fill=target, y=delta_NOT)) +
-  geom_bar(stat="identity") +
-  facet_grid(m2l~mapped_task)
+#ggplot(emb_dist_diff_d %>% filter(mapped_task %in% emb_classifications),
+#       aes(x=target, fill=target, y=delta_NOT)) +
+#  geom_bar(stat="identity") +
+#  facet_grid(m2l~mapped_task)
 ```
 
 ```{r}
@@ -398,7 +398,40 @@ ggplot(data=meta_class_bookend_summarized_d %>% filter(time=="guess"), aes(x=met
   scale_fill_brewer(palette="Dark2") +
   labs(x="New task", y="Mean proportion wrong") +
   ylim(0, 1) +
-  geom_hline(yintercept=0.5, alpha=0.5, linetype=2) +
+#  geom_hline(yintercept=0.5, alpha=0.5, linetype=2) +
   facet_grid(. ~ m2l)
   
 ```
+
+# input embedding analyses
+
+```{r}
+m2l = "True"
+emb_d = data.frame()
+for (run_i in 0:(nruns-1)) {
+  filename = sprintf("meta_input_embedding_results/m2l%s_run%i_guess_input_embeddings.csv", m2l, run_i)
+  if (!file.exists(filename)) {
+    next
+  }
+  this_d = read.csv(filename, header=T)
+  this_d = this_d %>%
+    filter(x0 %in% c(0, 1), x1 %in% c(2, 3, 4)) %>%
+    gather(input, value, -c(dimension, x0, x1)) %>%
+    filter(substring(input, nchar(input)-7) == "11111111") %>% # declutter the space
+    unite(relevant_and_input, x0,x1,input) %>%
+    spread(relevant_and_input, value)
+  this_d$run = run_i
+  emb_d = bind_rows(emb_d, this_d)
+}
+pcs = prcomp(emb_d %>% select(-dimension, -run), center=T, scale=T)
+pc_d = data.frame(pcs$rotation)
+pc_d$task = row.names(pc_d)
+ggplot(pc_d, aes(x=PC1, y=PC2, shape=substring(task, 1, 3), color=substring(task, 1, 3))) +
+  geom_point(size=2) +
+  geom_text(aes(label=substring(task, 5, 9))) #+
+#  guides(color=F)
+ggsave(sprintf("plots/meta/input_PCA_m2l%s_%s.png", m2l, emb_type), width=7, height=7)
+
+```
+
+
