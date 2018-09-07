@@ -18,7 +18,7 @@ meta_mapping_tasks = c("ID", "NOT", "A2O", "NOTA2O")
 meta_classification_tasks = c("isX0", "isNOTX0", "isAND", "isOR", "isNOTAND", "isXOR", "isNOTXOR")
 new_meta_class_tasks = c("isNOTOR")
 truly_new_tasks = c("NOTOR")
-nruns = 4
+nruns = 7
 m2ls = c("True", "False")
 ```
 
@@ -125,15 +125,17 @@ for (emb_type in c("guess", "final")) {
     pc_d$task = row.names(pc_d)
     ggplot(pc_d, aes(x=PC1, y=PC2, color=task)) +
       geom_point() +
-      geom_text(aes(label=task)) 
-    ggsave(sprintf("plots/meta/PCA_m2l%s_%s.png", m2l, emb_type), width=20, height=7)
+      geom_text(aes(label=task))  +
+      guides(color=F)
+    ggsave(sprintf("plots/meta/PCA_m2l%s_%s.png", m2l, emb_type), width=7, height=7)
     pcs = prcomp(emb_d %>% select(-dimension, -run), center=T, scale=T)
     pc_d = data.frame(pcs$rotation)
     pc_d$task = row.names(pc_d)
     ggplot(pc_d, aes(x=PC1, y=PC2, color=task)) +
       geom_point() +
-      geom_text(aes(label=task)) 
-    ggsave(sprintf("plots/meta/PCA_full_m2l%s_%s.png", m2l, emb_type), width=20, height=7)
+      geom_text(aes(label=task)) +
+      guides(color=F)
+    ggsave(sprintf("plots/meta/PCA_full_m2l%s_%s.png", m2l, emb_type), width=7, height=7)
   }
 }
 ```
