@@ -6,6 +6,7 @@ from __future__ import division
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+from tensorflow.python.client import timeline
 #from scipy.spatial.distance import pdist
 import datasets
 from orthogonal_matrices import random_orthogonal
@@ -31,8 +32,8 @@ refresh_meta_cache_every = 1 # how many epochs between updates to meta_dataset_c
 #train_momentum = 0.8
 #adam_epsilon = 1e-3
 
-max_base_epochs = 4000 
-max_new_epochs = 200
+max_base_epochs = 20 
+max_new_epochs = 1
 num_task_hidden_layers = 3
 num_meta_hidden_layers = 3
 output_dir = "meta_results/"
@@ -970,38 +971,130 @@ class meta_model(object):
                 
                 for i in range(num_hidden_hyper):
                     fout.write(("%i, %i, %i, " %(i, x0, x1)) + (format_string % tuple(input_embeddings[:, i])))
+
+    def tf_profile(self):
+        options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+        run_metadata = tf.RunMetadata()
+
+        # burn-in
+	lr = learning_rate = meta_learning_rate = init_learning_rate 
+        self.refresh_meta_dataset_cache()
+        order = np.random.permutation(len(self.base_tasks))
+        for task_i in order:
+            task = self.base_tasks[task_i]
+            dataset =  self.base_datasets[task]
+            self.dataset_train_step(dataset, learning_rate)
+
+        order = np.random.permutation(len(self.all_base_meta_tasks))
+        for task_i in order:
+            task = self.all_base_meta_tasks[task_i]
+            dataset =  self.meta_dataset_cache[task]
+            self.dataset_train_step(dataset, meta_learning_rate,
+                                    base_output=len(dataset["y"].shape) == 1,
+                                    base_input=False)
+
+        curr_losses = self.base_eval()
+        self.refresh_meta_dataset_cache()
+
+
+        # trace get basic task embedding:
+        dataset = self.base_datasets[self.base_tasks[1]] 
+        base_input = True
+        base_output = True
+	meta_binary = False
+        self.sess.run(
+            self.function_embedding,
+            feed_dict={
+                self.base_input_ph: dataset["x"] if base_input else self.dummy_base_input,
+                self.guess_input_mask_ph: np.ones(len(dataset["x"]), dtype=np.bool),
+                self.is_base_input: base_input,
+                self.is_base_output: base_output,
+                self.base_target_ph: dataset["y"] if base_output else self.dummy_base_output,
+                self.meta_input_ph: self.dummy_meta_input if base_input else dataset["x"],
+                self.meta_target_ph: self.dummy_meta_output if base_output else dataset["y"]
+            }, options=options, run_metadata=run_metadata)
+
+	fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+	chrome_trace = fetched_timeline.generate_chrome_trace_format()
+	with open('timeline_base_embed.json', 'w') as f:
+	    f.write(chrome_trace)
+
+	# trace base train step
+        guess_mask = self._guess_mask(len(dataset["x"]))
+        this_feed_dict = {
+            self.lr_ph: lr,
+            self.base_input_ph: dataset["x"] if base_input else self.dummy_base_input,
+            self.guess_input_mask_ph: guess_mask,
+            self.is_base_input: base_input,
+            self.is_base_output: base_output,
+            self.base_target_ph: dataset["y"] if base_output or meta_binary else self.dummy_base_output,
+            self.meta_input_ph: self.dummy_meta_input if base_input else dataset["x"],
+            self.meta_target_ph: self.dummy_meta_output if base_output or meta_binary else dataset["y"]
+        }
+        loss = self.sess.run(self.base_full_train, feed_dict=this_feed_dict, options=options, run_metadata=run_metadata)
+	fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+	chrome_trace = fetched_timeline.generate_chrome_trace_format()
+	with open('timeline_base_train.json', 'w') as f:
+	    f.write(chrome_trace)
+
+        # trace get meta task embedding
+        dataset = self.meta_dataset_cache["NOT"]
+        base_input = False
+        base_output = False
+        self.sess.run(
+            self.function_embedding,
+            feed_dict={
+                self.base_input_ph: dataset["x"] if base_input else self.dummy_base_input,
+                self.guess_input_mask_ph: np.ones(len(dataset["x"]), dtype=np.bool),
+                self.is_base_input: base_input,
+                self.is_base_output: base_output,
+                self.base_target_ph: dataset["y"] if base_output else self.dummy_base_output,
+                self.meta_input_ph: self.dummy_meta_input if base_input else dataset["x"],
+                self.meta_target_ph: self.dummy_meta_output if base_output else dataset["y"]
+            }, options=options, run_metadata=run_metadata)
+
+	fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+	chrome_trace = fetched_timeline.generate_chrome_trace_format()
+	with open('timeline_NOT_embed.json', 'w') as f:
+	    f.write(chrome_trace)
+
+	# trace meta train step
+        guess_mask = self._guess_mask(len(dataset["x"]))
+        this_feed_dict = {
+            self.lr_ph: lr,
+            self.base_input_ph: dataset["x"] if base_input else self.dummy_base_input,
+            self.guess_input_mask_ph: guess_mask,
+            self.is_base_input: base_input,
+            self.is_base_output: base_output,
+            self.base_target_ph: dataset["y"] if base_output or meta_binary else self.dummy_base_output,
+            self.meta_input_ph: self.dummy_meta_input if base_input else dataset["x"],
+            self.meta_target_ph: self.dummy_meta_output if base_output or meta_binary else dataset["y"]
+        }
+        loss = self.sess.run(self.base_full_train, feed_dict=this_feed_dict, options=options, run_metadata=run_metadata)
+	fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+	chrome_trace = fetched_timeline.generate_chrome_trace_format()
+	with open('timeline_meta_train.json', 'w') as f:
+	    f.write(chrome_trace)
+        
+
+
+
+
+
+
+        
                 
 ## running stuff
 
-for run_i in range(run_offset, run_offset+num_runs):
-    for meta_two_level in [True, False]: 
+for run_i in [0]:
+    for meta_two_level in [True]: 
         np.random.seed(run_i)
         perm_list_dict = {task: (np.random.permutation(_get_perm_list_template(num_input)) if task not in ["XO", "NOTX0"] else np.random.permutation(_get_single_perm_list_template(num_input))) for task in total_tasks} 
         tf.set_random_seed(run_i)
-        filename_prefix = "m2l%r_run%i" %(meta_two_level, run_i)
+        filename_prefix = "profiling_m2l%r_run%i" %(meta_two_level, run_i)
         print("Now running %s" % filename_prefix)
 
         model = meta_model(num_input, base_tasks, base_task_repeats, new_tasks,
                            base_meta_tasks, base_meta_mappings, new_meta_tasks,
                            meta_two_level=meta_two_level) 
-        model.save_embeddings(filename=output_dir + filename_prefix + "_init_embeddings.csv")
-
-#        cProfile.run('model.train_base_tasks(filename=output_dir + filename_prefix + "_base_losses.csv")')
-#        exit()
-        model.train_base_tasks(filename=output_dir + filename_prefix + "_base_losses.csv")
-        model.save_embeddings(filename=output_dir + filename_prefix + "_guess_embeddings.csv")
-        if save_input_embeddings:
-            model.save_input_embeddings(filename=output_dir + filename_prefix + "_guess_input_embeddings.csv")
-        for meta_task in base_meta_mappings:
-            model.save_embeddings(filename=output_dir + filename_prefix + "_" + meta_task + "_guess_embeddings.csv",
-                                  meta_task=meta_task)
-
-        model.train_new_tasks(filename_prefix=output_dir + filename_prefix + "_new_")
-        model.save_embeddings(filename=output_dir + filename_prefix + "_final_embeddings.csv")
-        for meta_task in base_meta_mappings:
-            model.save_embeddings(filename=output_dir + filename_prefix + "_" + meta_task + "_final_embeddings.csv",
-                                  meta_task=meta_task)
-
-
-        tf.reset_default_graph()
-
+        model.tf_profile()
