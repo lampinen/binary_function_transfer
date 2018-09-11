@@ -12,14 +12,14 @@ from orthogonal_matrices import random_orthogonal
 
 pi = np.pi
 ### Parameters
-num_input = 9
+num_input = 10
 num_output = 1 # cannot be changed without somewhat substantial code modifications
 num_hidden = 64
 num_hidden_hyper = 64
-num_runs = 5 
+num_runs = 10 
 run_offset = 0
 init_learning_rate = 1e-4
-init_meta_learning_rate = 1e-4
+init_meta_learning_rate = 2e-4
 new_init_learning_rate = 1e-6
 new_init_meta_learning_rate = 1e-6
 lr_decay = 0.85
@@ -44,14 +44,14 @@ save_input_embeddings = False # whether to save full input embeddings -- is pret
 hyper_convolutional = False # whether hyper network creates weights convolutionally
 conv_in_channels = 6
 
-batch_size = 512
-meta_batch_size = 384 # how much of each dataset the function embedding guesser sees 
+batch_size = 1024
+meta_batch_size = 768 # how much of each dataset the function embedding guesser sees 
 early_stopping_thresh = 0.005
 base_tasks = ["X0", "NOTX0", "AND", "NOTAND", "OR", "XOR", "NOTXOR"]
 base_meta_tasks = ["isX0", "isNOTX0", "isAND", "isNOTAND", "isOR", "isXOR", "isNOTXOR"]
 new_meta_tasks = ["isNOTOR"]
-base_meta_mappings = ["ID", "NOT", "A2O", "NOTA2O"]
-base_task_repeats = 35 # how many times each base task is seen
+base_meta_mappings = ["ID", "NOT", "A2O"]#, "NOTA2O"]
+base_task_repeats = 44 # how many times each base task is seen
 new_tasks = ["X0", "AND", "OR", "NOTOR", "NOTAND", "XOR", "NOTXOR"]
 ###
 var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=1., mode='FAN_AVG')
