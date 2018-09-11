@@ -36,7 +36,7 @@ max_base_epochs = 20
 max_new_epochs = 1
 num_task_hidden_layers = 3
 num_meta_hidden_layers = 3
-output_dir = "meta_results/"
+output_dir = "/mnt/fs2/lampinen/meta_results/"
 save_every = 10 #20
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 cue_dimensions = True # if true, provide two-hot cues of which dimensions are relevant
@@ -493,10 +493,10 @@ class meta_model(object):
         self.base_full_train = base_full_optimizer.minimize(self.total_loss)
 
 
-        # initialize
-        sess_config = tf.ConfigProto()
-        sess_config.gpu_options.allow_growth = True
-        self.sess = tf.Session(config=sess_config)
+        # initialize -- no being nice in profiling
+#        sess_config = tf.ConfigProto()
+#        sess_config.gpu_options.allow_growth = True
+        self.sess = tf.Session()
         self.sess.run(tf.global_variables_initializer())
         self.refresh_meta_dataset_cache()
         
@@ -1016,7 +1016,7 @@ class meta_model(object):
 
 	fetched_timeline = timeline.Timeline(run_metadata.step_stats)
 	chrome_trace = fetched_timeline.generate_chrome_trace_format()
-	with open('timeline_base_embed.json', 'w') as f:
+	with open(output_dir + 'timeline_base_embed.json', 'w') as f:
 	    f.write(chrome_trace)
 
 	# trace base train step
@@ -1034,7 +1034,7 @@ class meta_model(object):
         loss = self.sess.run(self.base_full_train, feed_dict=this_feed_dict, options=options, run_metadata=run_metadata)
 	fetched_timeline = timeline.Timeline(run_metadata.step_stats)
 	chrome_trace = fetched_timeline.generate_chrome_trace_format()
-	with open('timeline_base_train.json', 'w') as f:
+	with open(output_dir + 'timeline_base_train.json', 'w') as f:
 	    f.write(chrome_trace)
 
         # trace get meta task embedding
@@ -1055,7 +1055,7 @@ class meta_model(object):
 
 	fetched_timeline = timeline.Timeline(run_metadata.step_stats)
 	chrome_trace = fetched_timeline.generate_chrome_trace_format()
-	with open('timeline_NOT_embed.json', 'w') as f:
+	with open(output_dir + 'timeline_NOT_embed.json', 'w') as f:
 	    f.write(chrome_trace)
 
 	# trace meta train step
@@ -1073,7 +1073,7 @@ class meta_model(object):
         loss = self.sess.run(self.base_full_train, feed_dict=this_feed_dict, options=options, run_metadata=run_metadata)
 	fetched_timeline = timeline.Timeline(run_metadata.step_stats)
 	chrome_trace = fetched_timeline.generate_chrome_trace_format()
-	with open('timeline_meta_train.json', 'w') as f:
+	with open(output_dir + 'timeline_meta_train.json', 'w') as f:
 	    f.write(chrome_trace)
         
 
