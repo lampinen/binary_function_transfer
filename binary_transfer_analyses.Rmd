@@ -149,19 +149,34 @@ ggsave("plots/median_results_summary.png")
 ```
 
 ```{r}
-ggplot(partly_more_summarized_d %>% filter(lr == 0.005, num_hidden==10, init_size==0.33, t1=="XOR"),
-       aes(x=epoch_001, color=t2)) +
-  geom_density() +
-  geom_vline(data=more_summarized_d %>% ungroup() %>% filter(lr == 0.005, num_hidden==10, init_size==0.33, t1=="XOR"),
-             aes(xintercept=median_epoch_001, color=t2), linetype=2) +
-  facet_grid(t2~.) +
-  theme(panel.grid=element_blank())
+for (this_t1 in c("XOR", "XOR_of_XORs", "AND")) {
+  ggplot(partly_more_summarized_d %>% filter(lr == 0.005, num_hidden==10, init_size==0.33, t1==this_t1),
+         aes(x=epoch_001, color=t2)) +
+    geom_density() +
+    geom_vline(data=more_summarized_d %>% ungroup() %>% filter(lr == 0.005, num_hidden==10, init_size==0.33, t1==this_t1),
+               aes(xintercept=median_epoch_001, color=t2), linetype=2) +
+    facet_grid(t2~.) +
+    theme(panel.grid=element_blank()) +
+    labs(x=sprintf("Epoch when %s loss < 0.001", this_t1)) +
+    guides(color=guide_legend(title="Prior task"))
+  ggsave(sprintf("plots/%s_stopping_by_t2_distributions.png", this_t1), width=7, height=10)
+}
 ```
 
 ```{r}
-ggsave("plots/XOR_stopping_by_t2_distributions.png", width=7, height=10)
+for (this_t1 in c("XOR", "XOR_of_XORs", "AND")) {
+  ggplot(partly_more_summarized_d %>% filter(lr == 0.005, num_hidden==10, init_size==1, t1==this_t1),
+         aes(x=epoch_001, color=t2)) +
+    geom_density() +
+    geom_vline(data=more_summarized_d %>% ungroup() %>% filter(lr == 0.005, num_hidden==10, init_size==1., t1==this_t1),
+               aes(xintercept=median_epoch_001, color=t2), linetype=2) +
+    facet_grid(t2~.) +
+    theme(panel.grid=element_blank()) +
+    labs(x=sprintf("Epoch when %s loss < 0.001", this_t1)) +
+    guides(color=guide_legend(title="Prior task"))
+  ggsave(sprintf("plots/%s_stopping_by_t2_distributions_large_weights.png", this_t1), width=7, height=10)
+}
 ```
-
 
 ```{r}
 partly_more_summarized_d %>% 
