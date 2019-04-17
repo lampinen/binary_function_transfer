@@ -9,7 +9,7 @@ import os
 PI = np.pi
 ### Parameters
 num_input_per = 5
-num_hidden = 10
+num_hidden = 20
 num_runs = 10 
 learning_rate = 0.005
 num_epochs = 20000
@@ -24,8 +24,8 @@ batch_size = 4
 early_stopping_thresh = 0.005
 
 # parameters for the synaptic intelligence 
-synaptic_intelligence_weight = 0.05
-stability_xi = 1e-2
+synaptic_intelligence_weight = 1e-1
+stability_xi = 1e-1
 ###
 if not os.path.exists(os.path.dirname(output_dir)):
     os.makedirs(os.path.dirname(output_dir))
@@ -40,7 +40,7 @@ else:
 for input_shared in [False]:#, True]:
     for run_i in xrange(num_runs):
         for t1 in ["XOR_of_XORs", "XOR", "XAO", "AND"]:
-            for t2 in ["X0", "XOR", "XOR_of_XORs", "XAO", "OR", "AND", "None"]:
+            for t2 in ["None", "X0", "XOR", "XOR_of_XORs", "XAO", "OR", "AND"]:
                 np.random.seed(run_i)
                 tf.set_random_seed(run_i)
                 filename_prefix = "t1%s_t2%s_sharedinput%s_run%i" %(t1, t2, str(input_shared), run_i)
@@ -108,52 +108,54 @@ for input_shared in [False]:#, True]:
                 else:
                     N1 = 2*num_input_per
                     
-                input_ph = tf.placeholder(tf.float32, shape=[None, N1])
-                target_ph = tf.placeholder(tf.float32, shape=[None, 2*output_size])
+                input_1_ph = tf.placeholder(tf.float32, shape=[None, num_input_per])
+                input_2_ph = tf.placeholder(tf.float32, shape=[None, num_input_per])
+                target_ph = tf.placeholder(tf.float32, shape=[None, output_size])
 
-                W = tf.get_variable('Wi', shape=[N1, num_hidden], initializer=var_scale_init)
-                b = tf.get_variable('Bi', shape=[num_hidden,], initializer=tf.zeros_initializer)
-                hidden = nonlinearity(tf.matmul(input_ph, W) + b)
+                W1 = tf.get_variable('Widom1', shape=[num_input_per, num_hidden], initializer=var_scale_init)
+                b1 = tf.get_variable('Bidom1', shape=[num_hidden,], initializer=tf.zeros_initializer)
+                W2 = tf.get_variable('Widom2', shape=[num_input_per, num_hidden], initializer=var_scale_init)
+                b2 = tf.get_variable('Bidom2', shape=[num_hidden,], initializer=tf.zeros_initializer)
+                hidden1 = nonlinearity(tf.matmul(input_1_ph, W1) + b1)
+                hidden2 = nonlinearity(tf.matmul(input_2_ph, W2) + b2)
 
                 for layer_i in range(1, num_layers-1):
                     W = tf.get_variable('Wh%i' % layer_i, shape=[num_hidden, num_hidden], initializer=var_scale_init)
                     b = tf.get_variable('B%i' % layer_i, shape=[num_hidden,], initializer=tf.zeros_initializer)
-                    hidden = nonlinearity(tf.matmul(hidden, W) + b)
+                    hidden1 = nonlinearity(tf.matmul(hidden1, W) + b)
+                    hidden2 = nonlinearity(tf.matmul(hidden2, W) + b)
 
-                W = tf.get_variable('Wo', shape=[num_hidden, 2*output_size], initializer=var_scale_init)
-                b = tf.get_variable('Bo', shape=[2*output_size,], initializer=tf.zeros_initializer)
-                output = nonlinearity(tf.matmul(hidden, W) + b)
-                
+                W1 = tf.get_variable('Wodom1', shape=[num_hidden, output_size], initializer=var_scale_init)
+                b1 = tf.get_variable('Bodom1', shape=[output_size,], initializer=tf.zeros_initializer)
+                W2 = tf.get_variable('Wodom2', shape=[num_hidden, output_size], initializer=var_scale_init)
+                b2 = tf.get_variable('Bodom2', shape=[output_size,], initializer=tf.zeros_initializer)
+                output1 = nonlinearity(tf.matmul(hidden1, W1) + b1)
+                output2 = nonlinearity(tf.matmul(hidden2, W2) + b2)
 
-                domain_one_mask = np.concatenate([np.ones(batch_subset, dtype=np.bool), np.zeros(batch_subset, dtype=np.bool)], axis=0)
-                d1_mask_ph = tf.placeholder(tf.bool, shape=[None,])
-                first_domain_loss = tf.nn.l2_loss(tf.boolean_mask(output[:, :output_size] - target_ph[:, :output_size], d1_mask_ph))
-                second_domain_loss = tf.nn.l2_loss(tf.boolean_mask(output[:, output_size:] - target_ph[:, output_size:], tf.logical_not(d1_mask_ph)))
-
-                if t2 == "None":
-                    loss = first_domain_loss
-                else:
-                    loss = first_domain_loss + second_domain_loss
+                first_domain_loss = tf.nn.l2_loss(output1 - target_ph)
+                second_domain_loss = tf.nn.l2_loss(output2 - target_ph)
 
                 trainable_vars = tf.trainable_variables()
                 # N.B. it would be better to do these computations in the graph
                 # instead of passing them in, but this implementation is easier 
-                reference_w_placeholders = [tf.placeholder(tf.float32, shape=var.get_shape()) for var in trainable_vars]
-                reg_strength_placeholders = [tf.placeholder(tf.float32, shape=var.get_shape()) for var in trainable_vars]
-                
-                parameter_wise_regs = [tf.reduce_sum(tf.multiply(reg_strength_placeholders[i], tf.square(v-reference_w_placeholders[i]))) for i, v in enumerate(trainable_vars)] 
-                surrogate_loss = synaptic_intelligence_weight * tf.add_n(parameter_wise_regs) 
-                if t2 == "None":
-                    surrogate_loss = 0.
 
                 optimizer = tf.train.GradientDescentOptimizer(learning_rate)
-                train = optimizer.minimize(loss)	
-                fd_train = optimizer.minimize(first_domain_loss + surrogate_loss)
                 sd_train = optimizer.minimize(second_domain_loss)
 
-                sd_grads_and_vars = optimizer.compute_gradients(second_domain_loss)
-                # make sure there's no crazy reordering
-                assert([gav[1] == v for (gav, v) in zip(sd_grads_and_vars, trainable_vars)])
+                sd_grads_and_vars = [(g, v) for (g,v) in optimizer.compute_gradients(second_domain_loss) if g is not None]
+                sd_trainable_vars = [v for g,v in sd_grads_and_vars]
+
+                reference_w_placeholders = [tf.placeholder(tf.float32, shape=var.get_shape()) for var in sd_trainable_vars]
+                reg_strength_placeholders = [tf.placeholder(tf.float32, shape=var.get_shape()) for var in sd_trainable_vars]
+                
+                parameter_wise_regs = [tf.reduce_sum(tf.multiply(reg_strength_placeholders[i], tf.square(v-reference_w_placeholders[i]))) for i, v in enumerate(sd_trainable_vars)] 
+
+                surrogate_loss = synaptic_intelligence_weight * tf.add_n(parameter_wise_regs) 
+
+                if t2 == "None":
+                    fd_train = optimizer.minimize(first_domain_loss)
+                else:
+                    fd_train = optimizer.minimize(first_domain_loss + surrogate_loss)
 
                 sess_config = tf.ConfigProto()
                 sess_config.gpu_options.allow_growth = True
@@ -166,36 +168,44 @@ for input_shared in [False]:#, True]:
 #
                     def train_epoch_1(reg_strengths=None, reference_ws=None):
                         apply_int_syn = reg_strengths is not None
-                        this_order = np.random.permutation(num_datapoints)
-                        for batch_i in xrange(num_datapoints//batch_size):
-                            feed_dict = {input_ph: x_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], 
-                                         target_ph: y_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :],
-                                         d1_mask_ph: domain_one_mask[this_order[batch_i*batch_size:(batch_i+1)*batch_size]]}
+                        this_order = np.random.permutation(batch_subset)
+                        for batch_i in xrange(batch_subset//batch_size):
+                            feed_dict = {input_1_ph: x1_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], 
+                                         target_ph: y1_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :]}
                             if apply_int_syn: # won't be applied if other task is None 
-                                for i in range(len(trainable_vars)):
+                                for i in range(len(sd_trainable_vars)):
                                     feed_dict[reference_w_placeholders[i]] = reference_ws[i] 
                                     feed_dict[reg_strength_placeholders[i]] = reg_strengths[i] 
                             sess.run(fd_train, feed_dict=feed_dict)
 
                     def train_epoch_2():
-                        this_order = np.random.permutation(num_datapoints)
-                        for batch_i in xrange(num_datapoints//batch_size):
-                            feed_dict = {input_ph: x_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], target_ph: y_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], d1_mask_ph: domain_one_mask[this_order[batch_i*batch_size:(batch_i+1)*batch_size]]}
+                        this_order = np.random.permutation(batch_subset)
+                        for batch_i in xrange(batch_subset//batch_size):
+                            feed_dict = {input_2_ph: x2_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], 
+                                         target_ph: y2_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :]}
                             old_weights_and_grads = sess.run(sd_grads_and_vars, feed_dict=feed_dict)
                             sess.run(sd_train, feed_dict=feed_dict)
-                            new_weights = sess.run(trainable_vars)
+                            new_weights = sess.run(sd_trainable_vars)
                             for var_i in range(len(new_weights)):
                                 grad, old_weight = old_weights_and_grads[var_i]
                                 reg_strengths[var_i] -= grad * (new_weights[var_i] - old_weight) 
 
 
-                    def evaluate():
-                        curr_loss1 = 0.
-                        curr_loss2 = 0.
-                        for batch_i in xrange(num_datapoints//batch_size):
-                            curr_loss1 += sess.run(first_domain_loss, feed_dict={input_ph: x_data[batch_i*batch_size:(batch_i+1)*batch_size, :], target_ph: y_data[batch_i*batch_size:(batch_i+1)*batch_size, :], d1_mask_ph: domain_one_mask[batch_i*batch_size:(batch_i+1)*batch_size]})
-                            curr_loss2 += sess.run(second_domain_loss, feed_dict={input_ph: x_data[batch_i*batch_size:(batch_i+1)*batch_size, :], target_ph: y_data[batch_i*batch_size:(batch_i+1)*batch_size, :], d1_mask_ph: domain_one_mask[batch_i*batch_size:(batch_i+1)*batch_size]})
-                        return curr_loss1/batch_subset, curr_loss2/batch_subset
+                    if t2 == "None":
+                        def evaluate():
+                            curr_loss1 = 0.
+                            for batch_i in xrange(batch_subset//batch_size):
+                                curr_loss1 += sess.run(first_domain_loss, feed_dict={input_1_ph: x1_data[batch_i*batch_size:(batch_i+1)*batch_size, :], target_ph: y1_data[batch_i*batch_size:(batch_i+1)*batch_size, :]})
+                            return curr_loss1/batch_subset, 0. 
+
+                    else:
+                        def evaluate():
+                            curr_loss1 = 0.
+                            curr_loss2 = 0.
+                            for batch_i in xrange(batch_subset//batch_size):
+                                curr_loss1 += sess.run(first_domain_loss, feed_dict={input_1_ph: x1_data[batch_i*batch_size:(batch_i+1)*batch_size, :], target_ph: y1_data[batch_i*batch_size:(batch_i+1)*batch_size, :]})
+                                curr_loss2 += sess.run(second_domain_loss, feed_dict={input_2_ph: x2_data[batch_i*batch_size:(batch_i+1)*batch_size, :], target_ph: y2_data[batch_i*batch_size:(batch_i+1)*batch_size, :]})
+                            return curr_loss1/batch_subset, curr_loss2/batch_subset
                     
                     sess.run(tf.global_variables_initializer())
                         
@@ -205,7 +215,7 @@ for input_shared in [False]:#, True]:
                         print("%i, %f, %f\n" % (0, loss1, loss2))
                         fout.write("%i, %f, %f\n" % (0, loss1, loss2))
                         if t2 != "None":
-                            initial_weight_vals = sess.run(trainable_vars)
+                            initial_weight_vals = sess.run(sd_trainable_vars)
                             reg_strengths = [np.zeros_like(v) for v in initial_weight_vals]
                             for epoch_i in xrange(1, num_epochs + 1):
                                 train_epoch_2()	
@@ -216,10 +226,12 @@ for input_shared in [False]:#, True]:
                                     if loss2 < early_stopping_thresh:
                                         print("Early stop prior!")
                                         break
-                            reference_weight_vals = sess.run(trainable_vars)
+                            reference_weight_vals = sess.run(sd_trainable_vars)
                             for var_i in range(len(reference_weight_vals)):
                                 reg_strengths[var_i] /= np.square(reference_weight_vals[var_i] - initial_weight_vals[var_i]) + stability_xi 
-#                                print(reg_strengths[var_i])
+
+                                print(sd_trainable_vars[var_i])
+                                print(reg_strengths[var_i])
                         for epoch_i in xrange(num_epochs+1, 2*num_epochs + 1):
 #                                if second_train_both: 
 #                                    train_epoch() # train on both	
