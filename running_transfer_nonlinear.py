@@ -24,7 +24,7 @@ batch_size = 4
 early_stopping_thresh = 0.005
 
 # parameters for the synaptic intelligence 
-synaptic_intelligence_weight = 0.33
+synaptic_intelligence_weight = 0.05
 stability_xi = 1e-2
 ###
 if not os.path.exists(os.path.dirname(output_dir)):
