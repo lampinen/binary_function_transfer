@@ -36,8 +36,8 @@ else:
 
 for input_shared in [False]:#, True]:
     for run_i in xrange(num_runs):
-        for t1 in ["XOR_of_XORs", "XOR", "AND"]:
-            for t2 in [ "X0", "XOR", "XOR_of_XORs", "OR", "AND", "None"]:
+        for t1 in ["XOR_of_XORs", "XOR", "XAO", "AND"]:
+            for t2 in ["X0", "XOR", "XOR_of_XORs", "XAO", "OR", "AND", "None"]:
                 np.random.seed(run_i)
                 tf.set_random_seed(run_i)
                 filename_prefix = "t1%s_t2%s_sharedinput%s_run%i" %(t1, t2, str(input_shared), run_i)
@@ -56,6 +56,8 @@ for input_shared in [False]:#, True]:
                     x1_data, y1_data = datasets.OR_dataset(num_input_per)
                 elif t1 == "parity":
                     x1_data, y1_data = datasets.parity_dataset(num_input_per)
+                elif t1 == "XAO":
+                    x1_data, y1_data = datasets.XAO_dataset(num_input_per)
 
                 if t2 == "X0":
                     x2_data, y2_data = datasets.X0_dataset(num_input_per)
@@ -71,6 +73,8 @@ for input_shared in [False]:#, True]:
                     x2_data, y2_data = datasets.OR_dataset(num_input_per)
                 elif t2 == "parity":
                     x2_data, y2_data = datasets.parity_dataset(num_input_per)
+                elif t2 == "XAO":
+                    x2_data, y2_data = datasets.XAO_dataset(num_input_per)
 
                 if t2 == "None":
                     if input_shared:

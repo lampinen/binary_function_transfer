@@ -100,3 +100,10 @@ def parity_dataset(num_inputs, num_to_keep=None):
     x_data = all_binary_possibilities(num_inputs)
     y_data = [[np.mod(np.sum(x[:num_to_keep]), 2)] for x in x_data]
     return np.array(x_data), np.array(y_data)
+
+def XAO_dataset(num_inputs):
+    if num_inputs < 4:
+        raise ValueError("Too few inputs")
+    x_data = all_binary_possibilities(num_inputs)
+    y_data = [[_XOR(x[0]*x[1], 1*(x[2] or x[3]))]  for x in x_data]
+    return np.array(x_data), np.array(y_data)
