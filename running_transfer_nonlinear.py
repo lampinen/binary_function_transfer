@@ -9,20 +9,23 @@ import os
 PI = np.pi
 ### Parameters
 num_input_per = 5
-num_hidden = 40
+num_hidden = 10
 num_runs = 10 
 learning_rate = 0.005
 num_epochs = 20000
 num_layers = 4
-init_mult = 1.
-output_dir = "results_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
-save_every = 20
+init_mult = 1. 
+output_dir = "results_synaptic_intelligence_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
+save_every = 5
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 train_sequentially = True # If true, train task 2 and then task 1
-second_train_both = False # If train_sequentially, whether to continue training on task 2 while training task 1
+#second_train_both = False # If train_sequentially, whether to continue training on task 2 while training task 1
 batch_size = 4
 early_stopping_thresh = 0.005
 
+# parameters for the synaptic intelligence 
+synaptic_intelligence_weight = 1.
+stability_xi = 1e-2
 ###
 if not os.path.exists(os.path.dirname(output_dir)):
     os.makedirs(os.path.dirname(output_dir))
@@ -131,12 +134,26 @@ for input_shared in [False]:#, True]:
                     loss = first_domain_loss
                 else:
                     loss = first_domain_loss + second_domain_loss
+
+                trainable_vars = tf.trainable_variables()
+                # N.B. it would be better to do these computations in the graph
+                # instead of passing them in, but this implementation is easier 
+                reference_w_placeholders = [tf.placeholder(tf.float32, shape=var.get_shape()) for var in trainable_vars]
+                reg_strength_placeholders = [tf.placeholder(tf.float32, shape=var.get_shape()) for var in trainable_vars]
+                
+                parameter_wise_regs = [tf.reduce_sum(tf.multiply(reg_strength_placeholder, tf.square(v-reference_w_placeholders[i]))) for i, v in enumerate(trainable_vars)] 
+                surrogate_loss = synaptic_intelligence_weight * tf.add_n(parameter_wise_regs) 
+
                 optimizer = tf.train.GradientDescentOptimizer(learning_rate)
                 train = optimizer.minimize(loss)	
                 fd_train = optimizer.minimize(first_domain_loss)
                 sd_train = optimizer.minimize(second_domain_loss)
+
+
+                sess_config = tf.ConfigProto()
+                sess_config.gpu_options.allow_growth = True
             
-                with tf.Session() as sess:
+                with tf.Session(config=sess_config) as sess:
                     def train_epoch():
                         this_order = np.random.permutation(num_datapoints)
                         for batch_i in xrange(num_datapoints//batch_size):
@@ -180,10 +197,10 @@ for input_shared in [False]:#, True]:
                                             print("Early stop prior!")
                                             break
                             for epoch_i in xrange(num_epochs+1, 2*num_epochs + 1):
-                                if second_train_both: 
-                                    train_epoch() # train on both	
-                                else: 
-                                    train_epoch_1()
+#                                if second_train_both: 
+#                                    train_epoch() # train on both	
+#                                else: 
+                                train_epoch_1()
                                 if epoch_i % save_every == 0:
                                     loss1, loss2 = evaluate()
                                     print("%i, %f, %f\n" % (epoch_i, loss1, loss2))
