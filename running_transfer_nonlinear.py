@@ -18,13 +18,13 @@ init_mult = 1.
 output_dir = "results_synaptic_intelligence_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
 save_every = 5
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
-train_sequentially = True # If true, train task 2 and then task 1
+#train_sequentially = True # If true, train task 2 and then task 1
 #second_train_both = False # If train_sequentially, whether to continue training on task 2 while training task 1
 batch_size = 4
 early_stopping_thresh = 0.005
 
 # parameters for the synaptic intelligence 
-synaptic_intelligence_weight = 1.
+synaptic_intelligence_weight = 0.33
 stability_xi = 1e-2
 ###
 if not os.path.exists(os.path.dirname(output_dir)):
@@ -141,33 +141,52 @@ for input_shared in [False]:#, True]:
                 reference_w_placeholders = [tf.placeholder(tf.float32, shape=var.get_shape()) for var in trainable_vars]
                 reg_strength_placeholders = [tf.placeholder(tf.float32, shape=var.get_shape()) for var in trainable_vars]
                 
-                parameter_wise_regs = [tf.reduce_sum(tf.multiply(reg_strength_placeholder, tf.square(v-reference_w_placeholders[i]))) for i, v in enumerate(trainable_vars)] 
+                parameter_wise_regs = [tf.reduce_sum(tf.multiply(reg_strength_placeholders[i], tf.square(v-reference_w_placeholders[i]))) for i, v in enumerate(trainable_vars)] 
                 surrogate_loss = synaptic_intelligence_weight * tf.add_n(parameter_wise_regs) 
+                if t2 == "None":
+                    surrogate_loss = 0.
 
                 optimizer = tf.train.GradientDescentOptimizer(learning_rate)
                 train = optimizer.minimize(loss)	
-                fd_train = optimizer.minimize(first_domain_loss)
+                fd_train = optimizer.minimize(first_domain_loss + surrogate_loss)
                 sd_train = optimizer.minimize(second_domain_loss)
 
+                sd_grads_and_vars = optimizer.compute_gradients(second_domain_loss)
+                # make sure there's no crazy reordering
+                assert([gav[1] == v for (gav, v) in zip(sd_grads_and_vars, trainable_vars)])
 
                 sess_config = tf.ConfigProto()
                 sess_config.gpu_options.allow_growth = True
             
                 with tf.Session(config=sess_config) as sess:
-                    def train_epoch():
+#                    def train_epoch():
+#                        this_order = np.random.permutation(num_datapoints)
+#                        for batch_i in xrange(num_datapoints//batch_size):
+#                            sess.run(train, feed_dict={input_ph: x_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], target_ph: y_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], d1_mask_ph: domain_one_mask[this_order[batch_i*batch_size:(batch_i+1)*batch_size]]})
+#
+                    def train_epoch_1(reg_strengths=None, reference_ws=None):
+                        apply_int_syn = reg_strengths is not None
                         this_order = np.random.permutation(num_datapoints)
                         for batch_i in xrange(num_datapoints//batch_size):
-                            sess.run(train, feed_dict={input_ph: x_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], target_ph: y_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], d1_mask_ph: domain_one_mask[this_order[batch_i*batch_size:(batch_i+1)*batch_size]]})
-
-                    def train_epoch_1():
-                        this_order = np.random.permutation(num_datapoints)
-                        for batch_i in xrange(num_datapoints//batch_size):
-                            sess.run(fd_train, feed_dict={input_ph: x_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], target_ph: y_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], d1_mask_ph: domain_one_mask[this_order[batch_i*batch_size:(batch_i+1)*batch_size]]})
+                            feed_dict = {input_ph: x_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], 
+                                         target_ph: y_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :],
+                                         d1_mask_ph: domain_one_mask[this_order[batch_i*batch_size:(batch_i+1)*batch_size]]}
+                            if apply_int_syn: # won't be applied if other task is None 
+                                for i in range(len(trainable_vars)):
+                                    feed_dict[reference_w_placeholders[i]] = reference_ws[i] 
+                                    feed_dict[reg_strength_placeholders[i]] = reg_strengths[i] 
+                            sess.run(fd_train, feed_dict=feed_dict)
 
                     def train_epoch_2():
                         this_order = np.random.permutation(num_datapoints)
                         for batch_i in xrange(num_datapoints//batch_size):
-                            sess.run(sd_train, feed_dict={input_ph: x_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], target_ph: y_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], d1_mask_ph: domain_one_mask[this_order[batch_i*batch_size:(batch_i+1)*batch_size]]})
+                            feed_dict = {input_ph: x_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], target_ph: y_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], d1_mask_ph: domain_one_mask[this_order[batch_i*batch_size:(batch_i+1)*batch_size]]}
+                            old_weights_and_grads = sess.run(sd_grads_and_vars, feed_dict=feed_dict)
+                            sess.run(sd_train, feed_dict=feed_dict)
+                            new_weights = sess.run(trainable_vars)
+                            for var_i in range(len(new_weights)):
+                                grad, old_weight = old_weights_and_grads[var_i]
+                                reg_strengths[var_i] -= grad * (new_weights[var_i] - old_weight) 
 
 
                     def evaluate():
@@ -185,39 +204,38 @@ for input_shared in [False]:#, True]:
                         loss1, loss2 = evaluate()
                         print("%i, %f, %f\n" % (0, loss1, loss2))
                         fout.write("%i, %f, %f\n" % (0, loss1, loss2))
-                        if train_sequentially:
-                            if t2 != "None":
-                                for epoch_i in xrange(1, num_epochs + 1):
-                                    train_epoch_2()	
-                                    if epoch_i % save_every == 0:
-                                        loss1, loss2 = evaluate()
-                                        print("%i, %f, %f\n" % (epoch_i, loss1, loss2))
-                                        fout.write("%i, %f, %f\n" % (epoch_i, loss1, loss2))
-                                        if loss2 < early_stopping_thresh:
-                                            print("Early stop prior!")
-                                            break
-                            for epoch_i in xrange(num_epochs+1, 2*num_epochs + 1):
+                        if t2 != "None":
+                            initial_weight_vals = sess.run(trainable_vars)
+                            reg_strengths = [np.zeros_like(v) for v in initial_weight_vals]
+                            for epoch_i in xrange(1, num_epochs + 1):
+                                train_epoch_2()	
+                                if epoch_i % save_every == 0:
+                                    loss1, loss2 = evaluate()
+                                    print("%i, %f, %f\n" % (epoch_i, loss1, loss2))
+                                    fout.write("%i, %f, %f\n" % (epoch_i, loss1, loss2))
+                                    if loss2 < early_stopping_thresh:
+                                        print("Early stop prior!")
+                                        break
+                            reference_weight_vals = sess.run(trainable_vars)
+                            for var_i in range(len(reference_weight_vals)):
+                                reg_strengths[var_i] /= np.square(reference_weight_vals[var_i] - initial_weight_vals[var_i]) + stability_xi 
+#                                print(reg_strengths[var_i])
+                        for epoch_i in xrange(num_epochs+1, 2*num_epochs + 1):
 #                                if second_train_both: 
 #                                    train_epoch() # train on both	
 #                                else: 
+                            if t2 != "None":
+                                train_epoch_1(reg_strengths=reg_strengths,
+                                              reference_ws=reference_weight_vals)
+                            else:
                                 train_epoch_1()
-                                if epoch_i % save_every == 0:
-                                    loss1, loss2 = evaluate()
-                                    print("%i, %f, %f\n" % (epoch_i, loss1, loss2))
-                                    fout.write("%i, %f, %f\n" % (epoch_i, loss1, loss2))
-                                    if loss1 < early_stopping_thresh:
-                                        print("Early stop main!")
-                                        break
+                            if epoch_i % save_every == 0:
+                                loss1, loss2 = evaluate()
+                                print("%i, %f, %f\n" % (epoch_i, loss1, loss2))
+                                fout.write("%i, %f, %f\n" % (epoch_i, loss1, loss2))
+                                if loss1 < early_stopping_thresh:
+                                    print("Early stop main!")
+                                    break
 
-                        else:
-                            for epoch_i in xrange(1, num_epochs + 1):
-                                train_epoch()	
-                                if epoch_i % save_every == 0:
-                                    loss1, loss2 = evaluate()
-                                    print("%i, %f, %f\n" % (epoch_i, loss1, loss2))
-                                    fout.write("%i, %f, %f\n" % (epoch_i, loss1, loss2))
-                                    if loss1 < early_stopping_thresh and loss2 < early_stopping_thresh:
-                                        print("Early stop!")
-                                        break
 
                 tf.reset_default_graph()
