@@ -12,13 +12,13 @@ library(ggplot2)
 
 ```{r}
 input_shareds = c("False")#, "True")
-t1s = c("XOR_of_XORs", "XOR", "AND")
-t2s = c("X0", "XOR", "XOR_of_XORs", "OR", "AND", "None")
+t1s = c("XOR_of_XORs", "XOR", "XAO", "AND")
+t2s = c("X0", "XOR", "XOR_of_XORs", "XAO", "OR", "AND", "None")
 lrs = c(0.005, 0.001)
-nhs = c(40, 10)
-ims = c(1., 0.33)
+nhs = c(10)
+ims = c(1.)
 num_runs = 10
-directory_format = "results_nh_%i_lr_%.4f_im_%.2f/"
+directory_format = "results_synaptic_intelligence_nh_%i_lr_%.4f_im_%.2f/"
 
 d = data.frame()
 for (run in 0:(num_runs-1)) {
@@ -135,37 +135,22 @@ ggplot(success_d, aes(x=t1, y=success_1_pct, fill=t2)) +
   geom_bar(stat="identity", position="dodge") +
   scale_color_brewer(palette="Dark2")+
   facet_grid(num_hidden + init_size ~ lr, scales="free_y")
-ggsave("plots/success_results.png")
+#ggsave("plots/success_results.png")
 ```
 
 ```{r}
-ggplot(more_summarized_d %>% filter(lr == 0.005, num_hidden==10, init_size==0.33), aes(x=t1, y=median_epoch_001, color=t2)) +
+ggplot(more_summarized_d %>% filter(lr == 0.005, num_hidden==10, init_size==1.), aes(x=t1, y=median_epoch_001, color=t2)) +
   geom_point(size=1.5) + 
   facet_wrap(~ input_shared) +
   labs(x = "Task 1", y= "Median epoch when loss < 0.05") +
   scale_color_brewer(palette="Dark2") +
   facet_grid(num_hidden + init_size + t1 ~ lr, scales="free_y")
-ggsave("plots/median_results_summary.png")
+#ggsave("plots/median_results_summary.png")
 ```
 
 ```{r}
-for (this_t1 in c("XOR", "XOR_of_XORs", "AND")) {
-  ggplot(partly_more_summarized_d %>% filter(lr == 0.005, num_hidden==10, init_size==0.33, t1==this_t1),
-         aes(x=epoch_001, color=t2)) +
-    geom_density() +
-    geom_vline(data=more_summarized_d %>% ungroup() %>% filter(lr == 0.005, num_hidden==10, init_size==0.33, t1==this_t1),
-               aes(xintercept=median_epoch_001, color=t2), linetype=2) +
-    facet_grid(t2~.) +
-    theme(panel.grid=element_blank()) +
-    labs(x=sprintf("Epoch when %s loss < 0.001", this_t1)) +
-    guides(color=guide_legend(title="Prior task"))
-  ggsave(sprintf("plots/%s_stopping_by_t2_distributions.png", this_t1), width=7, height=10)
-}
-```
-
-```{r}
-for (this_t1 in c("XOR", "XOR_of_XORs", "AND")) {
-  ggplot(partly_more_summarized_d %>% filter(lr == 0.005, num_hidden==10, init_size==1, t1==this_t1),
+for (this_t1 in c("XOR", "XOR_of_XORs", "XAO", "AND")) {
+  ggplot(partly_more_summarized_d %>% filter(lr == 0.005, num_hidden==10, init_size==1., t1==this_t1),
          aes(x=epoch_001, color=t2)) +
     geom_density() +
     geom_vline(data=more_summarized_d %>% ungroup() %>% filter(lr == 0.005, num_hidden==10, init_size==1., t1==this_t1),
@@ -174,7 +159,7 @@ for (this_t1 in c("XOR", "XOR_of_XORs", "AND")) {
     theme(panel.grid=element_blank()) +
     labs(x=sprintf("Epoch when %s loss < 0.001", this_t1)) +
     guides(color=guide_legend(title="Prior task"))
-  ggsave(sprintf("plots/%s_stopping_by_t2_distributions_large_weights.png", this_t1), width=7, height=10)
+  ggsave(sprintf("plots/%s_stopping_by_t2_distributions_synaptic_intelligence.png", this_t1), width=7, height=10)
 }
 ```
 
