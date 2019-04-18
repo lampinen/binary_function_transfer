@@ -9,8 +9,8 @@ import os
 PI = np.pi
 ### Parameters
 num_input_per = 5
-num_hidden = 20
-num_runs = 10 
+num_hidden = 10
+num_runs = 50 
 learning_rate = 0.005
 num_epochs = 20000
 num_layers = 4
