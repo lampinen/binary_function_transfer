@@ -10,7 +10,7 @@ PI = np.pi
 ### Parameters
 num_input_per = 5
 num_hidden = 10
-num_runs = 50 
+num_runs = 10 
 learning_rate = 0.005
 num_epochs = 20000
 num_layers = 4
@@ -40,7 +40,7 @@ else:
 for input_shared in [False]:#, True]:
     for run_i in xrange(num_runs):
         for t1 in ["XOR_of_XORs", "XOR", "XAO", "AND"]:
-            for t2 in ["None", "X0", "XOR", "XOR_of_XORs", "XAO", "OR", "AND"]:
+            for t2 in ["X0", "None", "XOR", "XOR_of_XORs", "XAO", "OR", "AND"]:
                 np.random.seed(run_i)
                 tf.set_random_seed(run_i)
                 filename_prefix = "t1%s_t2%s_sharedinput%s_run%i" %(t1, t2, str(input_shared), run_i)
@@ -227,11 +227,25 @@ for input_shared in [False]:#, True]:
                                         print("Early stop prior!")
                                         break
                             reference_weight_vals = sess.run(sd_trainable_vars)
-                            for var_i in range(len(reference_weight_vals)):
-                                reg_strengths[var_i] /= np.square(reference_weight_vals[var_i] - initial_weight_vals[var_i]) + stability_xi 
+                            with open("%s%s_reg_strengths.csv" % (output_dir, filename_prefix), "w") as fout_reg:
+                                fout_reg.write("weight_array, i, j, value\n") 
+                                for var_i in range(len(reference_weight_vals)):
+                                    var_name = sd_trainable_vars[var_i].name
+                                    reg_strengths[var_i] /= np.square(reference_weight_vals[var_i] - initial_weight_vals[var_i]) + stability_xi 
+                                    if len(reg_strengths[var_i].shape) == 1:
+                                        nrow = 1
+                                        ncol = reg_strengths[var_i].shape[0]
+                                    else:
+                                        nrow, ncol = reg_strengths[var_i].shape
 
-                                print(sd_trainable_vars[var_i])
-                                print(reg_strengths[var_i])
+                                    for i in range(nrow):
+                                        for j in range(ncol):
+                                            if nrow == 1:
+                                                value = reg_strengths[var_i][j]
+                                            else:
+                                                value = reg_strengths[var_i][i, j]
+                                            fout_reg.write("%s, %i, %i, %f\n" % (var_name, i, j, value)) 
+
                         for epoch_i in xrange(num_epochs+1, 2*num_epochs + 1):
 #                                if second_train_both: 
 #                                    train_epoch() # train on both	

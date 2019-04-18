@@ -170,3 +170,67 @@ partly_more_summarized_d %>%
   head()
 ```
 
+# synaptic intelligence weight analyses
+
+
+```{r}
+
+si_d = data.frame()
+for (run in 0:(num_runs-1)) {
+  for (input_shared in input_shareds) {
+    for (num_hidden in nhs) {
+      for (lr in lrs) {
+        for (init_mult in ims) {
+          directory = sprintf(directory_format, num_hidden, lr, init_mult)
+          for (t1 in t1s) {
+            for (t2 in t2s) {
+            
+              filename = sprintf("%st1%s_t2%s_sharedinput%s_run%i_reg_strengths.csv", directory, t1, t2, input_shared, run)
+              if (!file.exists(filename)) {
+                next
+              }
+              this_d = tryCatch(read.csv(filename, header=T),
+                                error = function(cond) {return(NA)})
+              if (length(this_d) == 1 && is.na(this_d)) {
+                next
+              }
+              this_d$num_hidden = num_hidden
+              this_d$lr = lr
+              this_d$init_size = init_mult
+              this_d$t2 = ifelse(t2 == "parity", "5-parity", t2)
+              this_d$run = run
+              this_d$t1 = ifelse(t1 == "parity", "5-parity", t1)
+              this_d$input_shared = input_shared
+              si_d = bind_rows(si_d, this_d)
+            }
+          } 
+        }
+      }
+    }
+  }
+}
+```
+
+```{r}
+ggplot(data=si_d %>%
+         mutate(weight_array = factor(weight_array, levels=c("Bidom2:0", "Widom2:0", "B1:0", "Wh1:0", "B2:0", "Wh2:0", "Bodom2:0", "Wodom2:0"))),
+       aes(color=t2, x=value)) +
+  geom_density() +
+  facet_wrap(. ~ weight_array,
+             scales="free_y") +
+  scale_x_log10() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x="Synaptic intelligence weight (log)")
+ggsave("plots/synaptic_intelligence_reg_strengths.png", width=8, height=4)
+```
+
+```{r}
+si_d %>%
+  group_by(weight_array,  run, t1, t2) %>%
+  summarize(max_val = max(value)) %>%
+  ungroup() %>%
+  group_by(weight_array, t2) %>%
+  summarize(mean_max_val = mean(max_val),
+            sd_max_val = sd(max_val))
+```
+
