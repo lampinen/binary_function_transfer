@@ -10,16 +10,16 @@ PI = np.pi
 ### Parameters
 num_input_per = 5
 num_hidden = 40
-num_runs = 10 
+num_runs = 50 
 learning_rate = 0.005
 num_epochs = 20000
 num_layers = 4
 init_mult = 1.
-output_dir = "results_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
-save_every = 20
+output_dir = "results_second_train_both_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
+save_every = 5
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 train_sequentially = True # If true, train task 2 and then task 1
-second_train_both = False # If train_sequentially, whether to continue training on task 2 while training task 1
+second_train_both = True # If train_sequentially, whether to continue training on task 2 while training task 1
 batch_size = 4
 early_stopping_thresh = 0.005
 

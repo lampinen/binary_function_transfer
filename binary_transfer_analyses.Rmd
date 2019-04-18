@@ -17,7 +17,7 @@ t2s = c("X0", "XOR", "XOR_of_XORs", "XAO", "OR", "AND", "None")
 lrs = c(0.005, 0.001)
 nhs = c(10)
 ims = c(1.)
-num_runs = 10
+num_runs = 50
 directory_format = "results_second_train_both_nh_%i_lr_%.4f_im_%.2f/"
 
 d = data.frame()
@@ -139,13 +139,13 @@ ggplot(success_d, aes(x=t1, y=success_1_pct, fill=t2)) +
 ```
 
 ```{r}
-ggplot(more_summarized_d %>% filter(lr == 0.005, num_hidden==10, init_size==0.33), aes(x=t1, y=median_epoch_001, color=t2)) +
+ggplot(more_summarized_d %>% filter(lr == 0.005, num_hidden==10, init_size==1.), aes(x=t1, y=median_epoch_001, color=t2)) +
   geom_point(size=1.5) + 
   facet_wrap(~ input_shared) +
   labs(x = "Task 1", y= "Median epoch when loss < 0.05") +
   scale_color_brewer(palette="Dark2") +
   facet_grid(num_hidden + init_size + t1 ~ lr, scales="free_y")
-#ggsave("plots/median_results_summary.png")
+ggsave("plots/median_results_summary_second_train_both.png")
 ```
 
 ```{r}
