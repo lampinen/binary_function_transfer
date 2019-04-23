@@ -9,7 +9,7 @@ import os
 PI = np.pi
 ### Parameters
 num_input_per = 5
-num_hidden = 40
+num_hidden = 10
 num_runs = 50 
 num_test = 4 # how many datapoints to hold out for eval 
 learning_rate = 0.005
