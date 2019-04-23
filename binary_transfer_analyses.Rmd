@@ -17,8 +17,8 @@ t2s = c("X0", "XOR", "XOR_of_XORs", "XAO", "OR", "AND", "None")
 lrs = c(0.005, 0.001)
 nhs = c(10)
 ims = c(1.)
-num_runs = 50
-directory_format = "results_second_train_both_nh_%i_lr_%.4f_im_%.2f/"
+num_runs = 10
+directory_format = "results_generalization_nh_%i_lr_%.4f_im_%.2f/"
 
 d = data.frame()
 for (run in 0:(num_runs-1)) {
@@ -58,42 +58,37 @@ for (run in 0:(num_runs-1)) {
 
 ```{r}
 intermediate_d =d %>% 
+  rename(loss1_train=loss1,
+         loss2_train=loss2) %>%
   complete(epoch, nesting(num_hidden, init_size, lr, t1, t2, input_shared, run)) %>%
-  group_by(num_hidden, init_size, lr, t1, t2, input_shared, run) %>%
-  mutate(loss1 = ifelse(is.na(loss1) & epoch > 20000, min(loss1, na.rm=T), loss1),
-         loss2 = ifelse(is.na(loss2) & epoch > 20000, min(loss2, na.rm=T), loss2),
-         successful_learning_2 = any(loss2 < 0.05, na.rm=T),
-         successful_learning_1 = any(loss1 < 0.05, na.rm=T),
-         successful_learning = successful_learning_1 & successful_learning_2) %>%
-  ungroup() 
+  gather(loss_name, loss_value, starts_with("loss")) %>%
+  separate(loss_name, c("task_domain", "train_or_test")) %>%
+  group_by(num_hidden, init_size, lr, t1, t2, input_shared, run, task_domain, train_or_test) %>%
+  mutate(loss_value = ifelse(is.na(loss_value), min(loss_value, na.rm=T), loss_value)) %>%
+  ungroup() %>%
+  spread(train_or_test, loss_value) %>%
+  group_by(num_hidden, init_size, lr, t1, t2, input_shared, run, task_domain) %>%
+  mutate(successful_learning_domain = any(train < 0.05)) %>%
+  ungroup() %>%
+  group_by(num_hidden, init_size, lr, t1, t2, input_shared, run, task_domain) %>%
+  mutate(successful_learning = all(successful_learning_domain)) %>%
+  ungroup() %>%
+  mutate(rescaled_epoch = ifelse(epoch < 20000, epoch, epoch-20000))
+  
 
 summarized_d = intermediate_d %>%
   filter(successful_learning) %>%
-  group_by(lr, num_hidden, init_size, t1, t2, input_shared, epoch) %>%
-  summarize(sd_loss1 = sd(loss1),
-            median_loss1 = median(loss1),
-            loss1 = mean(loss1),
-            sd_loss2 = sd(loss2),
-            median_loss2 = median(loss2),
-            loss2 = mean(loss2)) %>%
+  group_by(lr, num_hidden, init_size, t1, t2, input_shared, epoch, task_domain) %>%
+  summarize(sd_train = sd(train),
+            median_train = median(train),
+            train = mean(train),
+            sd_test = sd(test),
+            median_test = median(test),
+            test = mean(test)) %>%
   ungroup()
 
-success_d =  intermediate_d %>%
-  filter(epoch==0) %>%
-  group_by(lr, num_hidden, init_size, t1, t2, input_shared) %>%
-  summarize(success_pct = sum(successful_learning)/n(),
-            success_1_pct = sum(successful_learning_1)/n()) %>%
-  ungroup()
-
-intermediate_d = NA # get that out of memory
-
-partly_more_summarized_d = d %>%
-  group_by(num_hidden, init_size, lr, t1, t2, input_shared, run) %>%
-  mutate(successful_learning_2 = any(loss2 < 0.05, na.rm=T),
-         successful_learning_1 = any(loss1 < 0.05, na.rm=T),
-         successful_learning = successful_learning_1 & successful_learning_2) %>%
-  ungroup() %>%
-  filter(successful_learning, loss1 < 0.05) %>%
+partly_more_summarized_d = intermediate_d %>%
+  filter(successful_learning, task_domain == "loss1", train < 0.05) %>%
   group_by(lr, num_hidden, init_size, t1, t2, input_shared, run) %>%
   summarize(epoch_001 = head(epoch-20000, 1)) %>%
   ungroup()
@@ -101,6 +96,14 @@ partly_more_summarized_d = d %>%
 more_summarized_d = partly_more_summarized_d %>%
   group_by(lr, num_hidden, init_size, t1, t2, input_shared) %>%
   summarize(median_epoch_001 = median(epoch_001))
+
+successful_generalization_d = intermediate_d %>%
+  filter(successful_learning, task_domain=="loss1", test < 0.05) %>%
+  group_by(lr, num_hidden, init_size, t1, t2, input_shared, run) %>%
+  summarize(epoch_005 = head(epoch, 1)) %>%
+  ungroup()
+  
+  
 ```
 
 ```{r}
@@ -108,34 +111,10 @@ theme_set(theme_bw())
 ```
 
 ```{r}
-# t1s = c("5-parity", "XOR_of_XORs", "XOR", "AND")
-# for (this_t1 in t1s) {
-#   upper_lim = NA
-#   ggplot(summarized_d %>% filter(t1 == this_t1), aes(x=epoch-20000, y=loss1, color=t2)) + 
-#   #  geom_line(aes(group=interaction(run,t2)), data=d, alpha=0.1) +
-#     geom_line(size=1.2) +
-#     xlim(0, upper_lim) +
-#     labs(x="epoch") +
-#     facet_wrap( ~ input_shared)
-#   #ggsave(sprintf("results_%s_smallweights.png", this_t1))
-#   
-#   ggplot(summarized_d %>% filter(t1 == this_t1), aes(x=epoch-20000, y=median_loss1, color=t2)) + 
-#   #  geom_line(aes(y=loss1, group=interaction(run,t2)), data=d, alpha=0.1)+
-#     geom_line(size=1.2) +
-#    xlim(0, upper_lim) +
-#     labs(x="epoch") +
-#     facet_wrap( ~ input_shared)
-#   #ggsave(sprintf("median_results_%s_smallweights.png", this_t1))
-#   
-# } 
-```
-
-```{r}
-ggplot(success_d, aes(x=t1, y=success_1_pct, fill=t2)) +
-  geom_bar(stat="identity", position="dodge") +
-  scale_color_brewer(palette="Dark2")+
-  facet_grid(num_hidden + init_size ~ lr, scales="free_y")
-#ggsave("plots/success_results.png")
+ggplot(successful_generalization_d, aes(x=t1, y=epoch_005, color=t2)) +
+  geom_point(stat="summary",
+             fun.y="mean") +
+  scale_color_brewer(palette="Dark2")
 ```
 
 ```{r}
@@ -145,44 +124,17 @@ ggplot(more_summarized_d %>% filter(lr == 0.005, num_hidden==10, init_size==1.),
   labs(x = "Task 1", y= "Median epoch when loss < 0.05") +
   scale_color_brewer(palette="Dark2") +
   facet_grid(num_hidden + init_size + t1 ~ lr, scales="free_y")
-ggsave("plots/median_results_summary_second_train_both.png")
+#ggsave("plots/median_results_summary_generalization.png")
 ```
 
-```{r}
-for (this_t1 in c("XOR", "XOR_of_XORs", "XAO", "AND")) {
-  ggplot(partly_more_summarized_d %>% filter(lr == 0.005, num_hidden==10, init_size==0.33, t1==this_t1),
-         aes(x=epoch_001, color=t2)) +
-    geom_density() +
-    geom_vline(data=more_summarized_d %>% ungroup() %>% filter(lr == 0.005, num_hidden==10, init_size==0.33, t1==this_t1),
-               aes(xintercept=median_epoch_001, color=t2), linetype=2) +
-    facet_grid(t2~.) +
-    theme(panel.grid=element_blank()) +
-    labs(x=sprintf("Epoch when %s loss < 0.001", this_t1)) +
-    guides(color=guide_legend(title="Prior task"))
-#  ggsave(sprintf("plots/%s_stopping_by_t2_distributions.png", this_t1), width=7, height=10)
-}
-```
 
 ```{r}
-for (this_t1 in c("XOR", "XOR_of_XORs", "XAO", "AND")) {
-  ggplot(partly_more_summarized_d %>% filter(lr == 0.005, num_hidden==10, init_size==1, t1==this_t1),
-         aes(x=epoch_001, color=t2)) +
-    geom_density() +
-    geom_vline(data=more_summarized_d %>% ungroup() %>% filter(lr == 0.005, num_hidden==10, init_size==1., t1==this_t1),
-               aes(xintercept=median_epoch_001, color=t2), linetype=2) +
-    facet_grid(t2~.) +
-    theme(panel.grid=element_blank()) +
-    labs(x=sprintf("Epoch when %s loss < 0.001", this_t1)) +
-    guides(color=guide_legend(title="Prior task"))
-#  ggsave(sprintf("plots/%s_stopping_by_t2_distributions_large_weights.png", this_t1), width=7, height=10)
-  ggsave(sprintf("plots/%s_stopping_by_t2_distributions_second_train_both.png", this_t1), width=7, height=10)
-}
-```
-
-```{r}
-partly_more_summarized_d %>% 
-  filter(lr == 0.005, num_hidden==10, init_size==0.33, t2=="None") %>%
-  arrange(epoch_001) %>%
-  head()
+ggplot(intermediate_d %>%
+         filter(task_domain == "loss1",
+                epoch >= 20000),
+       aes(x=rescaled_epoch, y=test, color=t2)) +
+  geom_line(stat="summary",
+            fun.y="mean") +
+  facet_wrap(~t1, scales="free")
 ```
 
