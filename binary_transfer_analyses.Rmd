@@ -16,8 +16,8 @@ t1s = c("XOR_of_XORs", "XAO", "XOR", "AND")
 t2s = c("X0", "XOR", "XOR_of_XORs", "XAO", "OR", "AND", "None")
 lrs = c(0.005, 0.001)
 nhs = c(10)
-ims = c(1.)
-num_runs = 10
+ims = c(0.33)
+num_runs = 100
 directory_format = "results_generalization_nh_%i_lr_%.4f_im_%.2f/"
 
 d = data.frame()
@@ -107,11 +107,49 @@ successful_generalization_d = intermediate_d %>%
 ```
 
 ```{r}
+successful_generalization_d_2 = d %>%
+  rename(loss1_train=loss1,
+         loss2_train=loss2) %>%
+  gather(loss_name, loss_value, starts_with("loss")) %>%
+  separate(loss_name, c("task_domain", "train_or_test")) %>%
+  spread(train_or_test, loss_value) %>%
+  filter(test < 0.05) %>% # only take runs where something was successfully generalized
+  group_by(lr, num_hidden, init_size, t1, t2, input_shared, run, task_domain) %>%
+  top_n(1, wt=epoch) %>% 
+  ungroup() %>%
+  group_by(lr, num_hidden, init_size, t1, t2, input_shared, run) %>%
+  summarize(successful_learning_source = any(task_domain=="loss2"),
+            successful_learning_target = any(task_domain=="loss1")) %>%
+  ungroup() 
+  
+```
+
+```{r}
 theme_set(theme_bw())
 ```
 
 ```{r}
-ggplot(successful_generalization_d, aes(x=t1, y=epoch_005, color=t2)) +
+ggplot(successful_generalization_d_2, aes(x=t1, y=1*successful_learning_target, fill=t2)) +
+  geom_bar(stat="summary",
+           fun.y="mean",
+           position="dodge") +
+  geom_errorbar(stat="summary",
+                fun.data="mean_cl_boot",
+                position=position_dodge(0.9),
+                width=0.25) +
+  scale_fill_brewer(palette="Dark2") +
+  facet_grid(~successful_learning_source)
+```
+
+```{r}
+ggplot(successful_generalization_d, aes(x=t1, fill=t2)) +
+  geom_bar(stat="count",
+           position="dodge") +
+  scale_fill_brewer(palette="Dark2") 
+```
+
+```{r}
+ggplot(successful_generalization_d, aes(x=t1, y=log(epoch_005), color=t2)) +
   geom_point(stat="summary",
              fun.y="mean") +
   scale_color_brewer(palette="Dark2")
