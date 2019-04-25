@@ -10,13 +10,13 @@ PI = np.pi
 ### Parameters
 num_input_per = 5
 num_hidden = 10
-num_runs = 50 
+num_runs = 100 
 num_test = 4 # how many datapoints to hold out for eval 
 learning_rate = 0.005
 num_epochs = 20000
-num_layers = 4
-init_mult = 1.
-output_dir = "results_generalization_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
+num_layers = 5
+init_mult = 0.33 
+output_dir = "results_generalization_2_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
 save_every = 5
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 train_sequentially = True # If true, train task 2 and then task 1
@@ -36,8 +36,8 @@ else:
 
 for input_shared in [False]:#, True]:
     for run_i in xrange(num_runs):
-        for t1 in ["XOR_of_XORs", "XOR", "XAO", "AND"]:
-            for t2 in ["X0", "XOR", "XOR_of_XORs", "XAO", "OR", "AND", "None"]:
+        for t1 in ["XOR_of_XORs", "XOR", "XAO", "ANDXORS", "AND"]:
+            for t2 in ["X0", "XOR", "XOR_of_XORs", "XAO", "OR", "ANDXORS", "AND", "None"]:
                 np.random.seed(run_i)
                 tf.set_random_seed(run_i)
                 filename_prefix = "t1%s_t2%s_sharedinput%s_run%i" %(t1, t2, str(input_shared), run_i)
@@ -58,6 +58,8 @@ for input_shared in [False]:#, True]:
                     x1_data, y1_data = datasets.parity_dataset(num_input_per)
                 elif t1 == "XAO":
                     x1_data, y1_data = datasets.XAO_dataset(num_input_per)
+                elif t1 == "ANDXORS":
+                    x1_data, y1_data = datasets.ANDXORS_dataset(num_input_per)
 
                 if t2 == "X0":
                     x2_data, y2_data = datasets.X0_dataset(num_input_per)
@@ -75,6 +77,8 @@ for input_shared in [False]:#, True]:
                     x2_data, y2_data = datasets.parity_dataset(num_input_per)
                 elif t2 == "XAO":
                     x2_data, y2_data = datasets.XAO_dataset(num_input_per)
+                elif t2 == "ANDXORS":
+                    x2_data, y2_data = datasets.ANDXORS_dataset(num_input_per)
 
                 if tf_pm:
                     x1_data = 2*x1_data - 1
