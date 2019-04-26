@@ -12,13 +12,13 @@ library(ggplot2)
 
 ```{r}
 input_shareds = c("False")#, "True")
-t1s = c("XOR_of_XORs", "XAO", "XOR", "AND")
-t2s = c("X0", "XOR", "XOR_of_XORs", "XAO", "OR", "AND", "None")
-lrs = c(0.005, 0.001)
+t1s = c("XOR_of_XORs", "XAO", "XOR", "AND", "ANDXORS")
+t2s = c("X0", "XOR", "XOR_of_XORs", "XAO", "OR", "AND", "ANDXORS", "None")
+lrs = c(0.005)
 nhs = c(10)
-ims = c(0.33, 1.)
+ims = c(0.33)
 num_runs = 100
-directory_format = "results_generalization_nh_%i_lr_%.4f_im_%.2f/"
+directory_format = "results_generalization_2_nh_%i_lr_%.4f_im_%.2f/"
 
 d = data.frame()
 for (run in 0:(num_runs-1)) {
