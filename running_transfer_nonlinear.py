@@ -9,14 +9,14 @@ import os
 PI = np.pi
 ### Parameters
 num_input_per = 5
-num_hidden = 10
-num_runs = 500 
+num_hidden = 40
+num_runs = 200 
 num_test = 4 # how many datapoints to hold out for eval 
 learning_rate = 0.005
 num_epochs = 30000
 num_layers = 6
 init_mult = 0.33 
-output_dir = "results_generalization_6l_stb_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
+output_dir = "results_generalization_complex_stb_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
 save_every = 5
 tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 train_sequentially = True # If true, train task 2 and then task 1
@@ -24,6 +24,7 @@ second_train_both = True # If train_sequentially, whether to continue training o
 batch_size = 4
 early_stopping_thresh = 0.005
 ###
+output_size = num_input_per
 if not os.path.exists(os.path.dirname(output_dir)):
     os.makedirs(os.path.dirname(output_dir))
 
@@ -36,49 +37,76 @@ else:
 
 for input_shared in [False]:#, True]:
     for run_i in range(num_runs):
-        for t1 in ["XOR_of_XORs", "XOR", "XAO", "ANDXORS", "AND"]:
-            for t2 in ["X0", "XOR", "XOR_of_XORs", "XAO", "OR", "ANDXORS", "AND", "None"]:
+#        for t1 in ["XOR_of_XORs", "XOR", "XAO", "ANDXORS", "AND"]:
+#            for t2 in ["X0", "XOR", "XOR_of_XORs", "XAO", "OR", "ANDXORS", "AND", "None"]:
+        for t1 in ["IDENTITY", "LOO_PARITY", "PAIR_AND", "PAIR_XOR", "MIX1", "MIX2"]:
+            for t2 in ["IDENTITY", "LOO_PARITY", "PAIR_AND", "PAIR_XOR", "MIX1", "MIX2", "None"]:
                 np.random.seed(run_i)
                 tf.set_random_seed(run_i)
                 filename_prefix = "t1%s_t2%s_sharedinput%s_run%i" %(t1, t2, str(input_shared), run_i)
                 print("Now running %s" % filename_prefix)
-                if t1 == "X0":
-                    x1_data, y1_data = datasets.X0_dataset(num_input_per)
-                elif t1 == "XOR":
-                    x1_data, y1_data = datasets.XOR_dataset(num_input_per)
-                elif t1 == "XOR_of_XORs":
-                    x1_data, y1_data = datasets.XOR_of_XORs_dataset(num_input_per)
-                elif t1 == "NXOR":
-                    x1_data, y1_data = datasets.NXOR_dataset(num_input_per)
-                elif t1 == "AND":
+#                if t1 == "X0":
+#                    x1_data, y1_data = datasets.X0_dataset(num_input_per)
+#                elif t1 == "XOR":
+#                    x1_data, y1_data = datasets.XOR_dataset(num_input_per)
+#                elif t1 == "XOR_of_XORs":
+#                    x1_data, y1_data = datasets.XOR_of_XORs_dataset(num_input_per)
+#                elif t1 == "NXOR":
+#                    x1_data, y1_data = datasets.NXOR_dataset(num_input_per)
+#                elif t1 == "AND":
+#                    x1_data, y1_data = datasets.AND_dataset(num_input_per)
+#                elif t1 == "OR":
+#                    x1_data, y1_data = datasets.OR_dataset(num_input_per)
+#                elif t1 == "parity":
+#                    x1_data, y1_data = datasets.parity_dataset(num_input_per)
+#                elif t1 == "XAO":
+#                    x1_data, y1_data = datasets.XAO_dataset(num_input_per)
+#                elif t1 == "ANDXORS":
+#                    x1_data, y1_data = datasets.ANDXORS_dataset(num_input_per)
+#
+#                if t2 == "X0":
+#                    x2_data, y2_data = datasets.X0_dataset(num_input_per)
+#                elif t2 == "XOR":
+#                    x2_data, y2_data = datasets.XOR_dataset(num_input_per)
+#                elif t2 == "XOR_of_XORs":
+#                    x2_data, y2_data = datasets.XOR_of_XORs_dataset(num_input_per)
+#                elif t2 == "NXOR":
+#                    x2_data, y2_data = datasets.NXOR_dataset(num_input_per)
+#                elif t2 == "AND":
+#                    x2_data, y2_data = datasets.AND_dataset(num_input_per)
+#                elif t2 == "OR":
+#                    x2_data, y2_data = datasets.OR_dataset(num_input_per)
+#                elif t2 == "parity":
+#                    x2_data, y2_data = datasets.parity_dataset(num_input_per)
+#                elif t2 == "XAO":
+#                    x2_data, y2_data = datasets.XAO_dataset(num_input_per)
+#                elif t2 == "ANDXORS":
+#                    x2_data, y2_data = datasets.ANDXORS_dataset(num_input_per)
+                if t1 == "IDENTITY":
+                    x1_data, y1_data = datasets.IDENTITY_dataset(num_input_per)
+                elif t1 == "LOO_PARITY":
+                    x1_data, y1_data = datasets.LOO_PARITY_dataset(num_input_per)
+                elif t1 == "PAIR_AND":
+                    x1_data, y1_data = datasets.PAIR_AND_dataset(num_input_per)
+                elif t1 == "PAIR_OR":
                     x1_data, y1_data = datasets.AND_dataset(num_input_per)
-                elif t1 == "OR":
+                elif t1 == "MIX1":
                     x1_data, y1_data = datasets.OR_dataset(num_input_per)
-                elif t1 == "parity":
-                    x1_data, y1_data = datasets.parity_dataset(num_input_per)
-                elif t1 == "XAO":
-                    x1_data, y1_data = datasets.XAO_dataset(num_input_per)
-                elif t1 == "ANDXORS":
-                    x1_data, y1_data = datasets.ANDXORS_dataset(num_input_per)
+                elif t1 == "MIX2":
+                    x1_data, y1_data = datasets.MIX2_dataset(num_input_per)
 
-                if t2 == "X0":
-                    x2_data, y2_data = datasets.X0_dataset(num_input_per)
-                elif t2 == "XOR":
-                    x2_data, y2_data = datasets.XOR_dataset(num_input_per)
-                elif t2 == "XOR_of_XORs":
-                    x2_data, y2_data = datasets.XOR_of_XORs_dataset(num_input_per)
-                elif t2 == "NXOR":
-                    x2_data, y2_data = datasets.NXOR_dataset(num_input_per)
-                elif t2 == "AND":
+                if t2 == "IDENTITY":
+                    x2_data, y2_data = datasets.IDENTITY_dataset(num_input_per)
+                elif t2 == "LOO_PARITY":
+                    x2_data, y2_data = datasets.LOO_PARITY_dataset(num_input_per)
+                elif t2 == "PAIR_AND":
+                    x2_data, y2_data = datasets.PAIR_AND_dataset(num_input_per)
+                elif t2 == "PAIR_OR":
                     x2_data, y2_data = datasets.AND_dataset(num_input_per)
-                elif t2 == "OR":
+                elif t2 == "MIX1":
                     x2_data, y2_data = datasets.OR_dataset(num_input_per)
-                elif t2 == "parity":
-                    x2_data, y2_data = datasets.parity_dataset(num_input_per)
-                elif t2 == "XAO":
-                    x2_data, y2_data = datasets.XAO_dataset(num_input_per)
-                elif t2 == "ANDXORS":
-                    x2_data, y2_data = datasets.ANDXORS_dataset(num_input_per)
+                elif t2 == "MIX2":
+                    x2_data, y2_data = datasets.MIX2_dataset(num_input_per)
 
                 if tf_pm:
                     x1_data = 2*x1_data - 1
@@ -87,7 +115,6 @@ for input_shared in [False]:#, True]:
                         x2_data = 2*x2_data - 1
                         y2_data = 2*y2_data - 1
 
-                output_size = 1
     
                 num_datapoints = len(x1_data)
                 num_train = num_datapoints - num_test
