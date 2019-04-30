@@ -9,30 +9,27 @@ import os
 PI = np.pi
 ### Parameters
 num_input_per = 5
-num_hidden = 40
+num_hidden = 50
 num_runs = 200 
 num_test = 4 # how many datapoints to hold out for eval 
-learning_rate = 0.005
-num_epochs = 30000
-num_layers = 6
+learning_rate = 0.01
+num_epochs = 40000
+num_layers = 5
 init_mult = 0.33 
 output_dir = "results_generalization_complex_stb_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
 save_every = 5
-tf_pm = True # if true, code t/f as +/- 1 rather than 1/0
 train_sequentially = True # If true, train task 2 and then task 1
 second_train_both = True # If train_sequentially, whether to continue training on task 2 while training task 1
 batch_size = 4
-early_stopping_thresh = 0.005
+early_stopping_thresh = 5e-4
 ###
 output_size = num_input_per
 if not os.path.exists(os.path.dirname(output_dir)):
     os.makedirs(os.path.dirname(output_dir))
 
 var_scale_init = tf.contrib.layers.variance_scaling_initializer(factor=init_mult, mode='FAN_AVG')
-if tf_pm:
-    nonlinearity = tf.nn.tanh
-else:
-    nonlinearity = tf.nn.sigmoid 
+nonlinearity = tf.nn.leaky_relu
+output_nonlinearity = tf.nn.sigmoid 
 
 
 for input_shared in [False]:#, True]:
@@ -108,14 +105,6 @@ for input_shared in [False]:#, True]:
                 elif t2 == "MIX2":
                     x2_data, y2_data = datasets.MIX2_dataset(num_input_per)
 
-                if tf_pm:
-                    x1_data = 2*x1_data - 1
-                    y1_data = 2*y1_data - 1
-                    if t2 != "None":
-                        x2_data = 2*x2_data - 1
-                        y2_data = 2*y2_data - 1
-
-    
                 num_datapoints = len(x1_data)
                 num_train = num_datapoints - num_test
 
@@ -153,11 +142,15 @@ for input_shared in [False]:#, True]:
                 b1 = tf.get_variable('Bodom1', shape=[output_size,], initializer=tf.zeros_initializer)
                 W2 = tf.get_variable('Wodom2', shape=[num_hidden, output_size], initializer=var_scale_init)
                 b2 = tf.get_variable('Bodom2', shape=[output_size,], initializer=tf.zeros_initializer)
-                output1 = nonlinearity(tf.matmul(hidden1, W1) + b1)
-                output2 = nonlinearity(tf.matmul(hidden2, W2) + b2)
+                logits1 = tf.matmul(hidden1, W1) + b1
+                logits2 = tf.matmul(hidden2, W2) + b2
+                output1 = output_nonlinearity(logits1)
+                output2 = output_nonlinearity(logits2)
 
-                first_domain_loss = tf.nn.l2_loss(output1 - target_ph)
-                second_domain_loss = tf.nn.l2_loss(output2 - target_ph)
+                first_domain_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits1, labels=target_ph)
+                first_domain_loss = tf.reduce_mean(first_domain_loss)
+                second_domain_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits2, labels=target_ph) 
+                second_domain_loss = tf.reduce_mean(second_domain_loss)
                     
                 optimizer = tf.train.GradientDescentOptimizer(learning_rate)
                 fd_train = optimizer.minimize(first_domain_loss)
