@@ -12,7 +12,7 @@ num_input_per = 5
 num_hidden = 40
 num_runs = 200 
 num_test = 4 # how many datapoints to hold out for eval 
-learning_rate = 0.01
+learning_rate = 1e-2
 num_epochs = 40000
 num_layers = 5
 init_mult = 0.33 
@@ -85,10 +85,10 @@ for input_shared in [False]:#, True]:
                     x1_data, y1_data = datasets.LOO_PARITY_dataset(num_input_per)
                 elif t1 == "PAIR_AND":
                     x1_data, y1_data = datasets.PAIR_AND_dataset(num_input_per)
-                elif t1 == "PAIR_OR":
-                    x1_data, y1_data = datasets.AND_dataset(num_input_per)
+                elif t1 == "PAIR_XOR":
+                    x1_data, y1_data = datasets.PAIR_XOR_dataset(num_input_per)
                 elif t1 == "MIX1":
-                    x1_data, y1_data = datasets.OR_dataset(num_input_per)
+                    x1_data, y1_data = datasets.MIX1_dataset(num_input_per)
                 elif t1 == "MIX2":
                     x1_data, y1_data = datasets.MIX2_dataset(num_input_per)
 
@@ -98,10 +98,10 @@ for input_shared in [False]:#, True]:
                     x2_data, y2_data = datasets.LOO_PARITY_dataset(num_input_per)
                 elif t2 == "PAIR_AND":
                     x2_data, y2_data = datasets.PAIR_AND_dataset(num_input_per)
-                elif t2 == "PAIR_OR":
-                    x2_data, y2_data = datasets.AND_dataset(num_input_per)
+                elif t2 == "PAIR_XOR":
+                    x2_data, y2_data = datasets.PAIR_XOR_dataset(num_input_per)
                 elif t2 == "MIX1":
-                    x2_data, y2_data = datasets.OR_dataset(num_input_per)
+                    x2_data, y2_data = datasets.MIX1_dataset(num_input_per)
                 elif t2 == "MIX2":
                     x2_data, y2_data = datasets.MIX2_dataset(num_input_per)
 
@@ -152,6 +152,7 @@ for input_shared in [False]:#, True]:
                 second_domain_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits2, labels=target_ph) 
                 second_domain_loss = tf.reduce_mean(second_domain_loss)
                     
+                #optimizer = tf.train.AdamOptimizer(learning_rate)
                 optimizer = tf.train.GradientDescentOptimizer(learning_rate)
                 fd_train = optimizer.minimize(first_domain_loss)
                 sd_train = optimizer.minimize(second_domain_loss)
