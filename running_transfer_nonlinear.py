@@ -8,19 +8,19 @@ import datasets
 import os
 PI = np.pi
 ### Parameters
-num_input_per = 5
-num_hidden = 40
+num_input_per = 6
+num_hidden = 50
 num_runs = 200 
-num_test = 4 # how many datapoints to hold out for eval 
-learning_rate = 1e-2
+num_test = 16 # how many datapoints to hold out for eval 
+learning_rate = 1e-3
 num_epochs = 40000
 num_layers = 5
-init_mult = 0.33 
-output_dir = "results_generalization_complex_stb_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
+init_mult = 0.01 
+output_dir = "results_generalization_complex_morein_stb_adam_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
 save_every = 5
 train_sequentially = True # If true, train task 2 and then task 1
 second_train_both = True # If train_sequentially, whether to continue training on task 2 while training task 1
-batch_size = 4
+batch_size = 16
 early_stopping_thresh = 5e-4
 ###
 output_size = num_input_per
@@ -152,8 +152,8 @@ for input_shared in [False]:#, True]:
                 second_domain_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits2, labels=target_ph) 
                 second_domain_loss = tf.reduce_mean(second_domain_loss)
                     
-                #optimizer = tf.train.AdamOptimizer(learning_rate)
-                optimizer = tf.train.GradientDescentOptimizer(learning_rate)
+                optimizer = tf.train.AdamOptimizer(learning_rate)
+#                optimizer = tf.train.GradientDescentOptimizer(learning_rate)
                 fd_train = optimizer.minimize(first_domain_loss)
                 sd_train = optimizer.minimize(second_domain_loss)
             
