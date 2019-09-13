@@ -22,7 +22,7 @@ output_dir = "results_generalization_nonbinary_stb_nh_%i_lr_%.4f_im_%.2f/" %(num
 save_every = 5
 train_sequentially = True # If true, train task 2 and then task 1
 second_train_both = True # If train_sequentially, whether to continue training on task 2 while training task 1
-batch_size = 4
+batch_size = 16
 early_stopping_thresh = 5e-4
 ###
 output_size = num_input_per
@@ -95,7 +95,8 @@ for input_shared in [False]:#, True]:
                 second_domain_loss = tf.nn.l2_loss(output2 - target_ph) 
                 second_domain_loss = tf.reduce_mean(second_domain_loss)
                     
-                optimizer = tf.train.GradientDescentOptimizer(learning_rate)
+                optimizer = tf.train.AdamOptimizer(learning_rate)
+#                optimizer = tf.train.GradientDescentOptimizer(learning_rate)
                 fd_train = optimizer.minimize(first_domain_loss)
                 sd_train = optimizer.minimize(second_domain_loss)
             
