@@ -160,3 +160,31 @@ def MIX2_dataset(num_inputs):
     if num_inputs > 5:
         y_data = np.concatenate([y_data, np.zeros([len(y_data), num_inputs - 5])], axis=-1)
     return np.array(x_data), np.array(y_data)
+
+def random_low_rank_function(num_inputs, num_outputs, num_examples, seed, num_hidden_layers=3,
+                             rank=4, input_range=1.):
+    """Random real-valued vector function, constructed by a deep relu network with
+    the given "rank" (i.e. hidden layer size), with inputs sampled uniformly
+    from [-input_range, input_range]"""
+    rng = np.random.RandomState(seed=seed)
+
+    scale = sqrt(2./(num_inputs + rank))
+    weights = [scale * rng.normal(size=[num_inputs, rank])]
+
+    scale = sqrt(1./(rank))
+    weights += [scale * rng.normal(size=[rank, rank])] 
+    
+    scale = sqrt(2./(num_outputs + rank))
+    weights += [scale * rng.normal(size=[rank, num_outputs])]
+
+    x_data = rng.uniform(-input_range, input_range,
+                         size=[num_examples, num_inputs]) 
+
+    y_data = x_data
+    for w in weights:
+        y_data = np.matmul(y_data, w) 
+        y_data = np.where(y_data >= 0.,  # leaky relu 
+                          y_data,
+                          0.2 * y_data)
+
+    return x_data, y_data
