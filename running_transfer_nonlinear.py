@@ -8,12 +8,12 @@ import datasets
 import os
 PI = np.pi
 ### Parameters
-num_input = 100
-num_output = 100
+num_input = 50
+num_output = 50
 num_examples = 100
-num_hidden = 100
+num_hidden = 50
 num_runs = 100 
-num_test = 4 # how many datapoints to hold out for eval 
+num_test = 20 # how many datapoints to hold out for eval 
 learning_rate = 0.01
 num_epochs = 40000
 num_layers = 5
@@ -22,10 +22,9 @@ output_dir = "results_generalization_nonbinary_stb_nh_%i_lr_%.4f_im_%.2f/" %(num
 save_every = 5
 train_sequentially = True # If true, train task 2 and then task 1
 second_train_both = True # If train_sequentially, whether to continue training on task 2 while training task 1
-batch_size = 16
+batch_size = 20
 early_stopping_thresh = 5e-4
 ###
-output_size = num_input_per
 if not os.path.exists(os.path.dirname(output_dir)):
     os.makedirs(os.path.dirname(output_dir))
 
@@ -36,41 +35,40 @@ output_nonlinearity = nonlinearity
 
 for input_shared in [False]:#, True]:
     for run_i in range(num_runs):
-        for t1 in range(2):
-            for t2 in ["None"] + range(2):
+        for t1 in [0, 1]:
+            for t2 in ["None", 0, 1]:
                 np.random.seed(run_i)
                 tf.set_random_seed(run_i)
                 filename_prefix = "t1%s_t2%s_sharedinput%s_run%i" %(str(t1), str(t2), str(input_shared), run_i)
                 print("Now running %s" % filename_prefix)
                 x1_data, y1_data = datasets.random_low_rank_function(
                     num_input, num_output, num_examples, seed=2 * run_i + t1)
-                if t2 != "None":
-                    x2_data, y2_data = datasets.random_low_rank_function(
-                        num_input, num_output, num_examples, seed=2 * run_i + t2)
 
                 num_datapoints = len(x1_data)
                 num_train = num_datapoints - num_test
 
                 order1 = np.random.permutation(num_datapoints)
-                order2 = np.random.permutation(num_datapoints)
                 x1_test_data = x1_data[order1[-num_test:]]
                 y1_test_data = y1_data[order1[-num_test:]]
                 x1_data = x1_data[order1[:num_train]]
                 y1_data = y1_data[order1[:num_train]]
 
                 if t2 != "None":
+                    order2 = np.random.permutation(num_datapoints)
+                    x2_data, y2_data = datasets.random_low_rank_function(
+                        num_input, num_output, num_examples, seed=2 * run_i + t2)
                     x2_test_data = x2_data[order2[-num_test:]]
                     y2_test_data = y2_data[order2[-num_test:]]
                     x2_data = x2_data[order2[:num_train]]
                     y2_data = y2_data[order2[:num_train]]
 
-                input_1_ph = tf.placeholder(tf.float32, shape=[None, num_input_per])
-                input_2_ph = tf.placeholder(tf.float32, shape=[None, num_input_per])
-                target_ph = tf.placeholder(tf.float32, shape=[None, output_size])
+                input_1_ph = tf.placeholder(tf.float32, shape=[None, num_input])
+                input_2_ph = tf.placeholder(tf.float32, shape=[None, num_input])
+                target_ph = tf.placeholder(tf.float32, shape=[None, num_output])
 
-                W1 = tf.get_variable('Widom1', shape=[num_input_per, num_hidden], initializer=var_scale_init)
+                W1 = tf.get_variable('Widom1', shape=[num_input, num_hidden], initializer=var_scale_init)
                 b1 = tf.get_variable('Bidom1', shape=[num_hidden,], initializer=tf.zeros_initializer)
-                W2 = tf.get_variable('Widom2', shape=[num_input_per, num_hidden], initializer=var_scale_init)
+                W2 = tf.get_variable('Widom2', shape=[num_input, num_hidden], initializer=var_scale_init)
                 b2 = tf.get_variable('Bidom2', shape=[num_hidden,], initializer=tf.zeros_initializer)
                 hidden1 = nonlinearity(tf.matmul(input_1_ph, W1) + b1)
                 hidden2 = nonlinearity(tf.matmul(input_2_ph, W2) + b2)
@@ -81,10 +79,10 @@ for input_shared in [False]:#, True]:
                     hidden1 = nonlinearity(tf.matmul(hidden1, W) + b)
                     hidden2 = nonlinearity(tf.matmul(hidden2, W) + b)
 
-                W1 = tf.get_variable('Wodom1', shape=[num_hidden, output_size], initializer=var_scale_init)
-                b1 = tf.get_variable('Bodom1', shape=[output_size,], initializer=tf.zeros_initializer)
-                W2 = tf.get_variable('Wodom2', shape=[num_hidden, output_size], initializer=var_scale_init)
-                b2 = tf.get_variable('Bodom2', shape=[output_size,], initializer=tf.zeros_initializer)
+                W1 = tf.get_variable('Wodom1', shape=[num_hidden, num_output], initializer=var_scale_init)
+                b1 = tf.get_variable('Bodom1', shape=[num_output,], initializer=tf.zeros_initializer)
+                W2 = tf.get_variable('Wodom2', shape=[num_hidden, num_output], initializer=var_scale_init)
+                b2 = tf.get_variable('Bodom2', shape=[num_output,], initializer=tf.zeros_initializer)
                 logits1 = tf.matmul(hidden1, W1) + b1
                 logits2 = tf.matmul(hidden2, W2) + b2
                 output1 = output_nonlinearity(logits1)
@@ -167,7 +165,7 @@ for input_shared in [False]:#, True]:
                                             print("Early stop prior!")
                                             break
                             for epoch_i in range(num_epochs+1, 2*num_epochs + 1):
-                                if second_train_both: 
+                                if second_train_both and t2 != "None": 
                                     train_epoch() # train on both        
                                 else: 
                                     train_epoch_1()

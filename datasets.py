@@ -168,13 +168,13 @@ def random_low_rank_function(num_inputs, num_outputs, num_examples, seed, num_hi
     from [-input_range, input_range]"""
     rng = np.random.RandomState(seed=seed)
 
-    scale = sqrt(2./(num_inputs + rank))
+    scale = np.sqrt(2./(num_inputs + rank))
     weights = [scale * rng.normal(size=[num_inputs, rank])]
 
-    scale = sqrt(1./(rank))
+    scale = np.sqrt(1./(rank))
     weights += [scale * rng.normal(size=[rank, rank])] 
     
-    scale = sqrt(2./(num_outputs + rank))
+    scale = np.sqrt(2./(num_outputs + rank))
     weights += [scale * rng.normal(size=[rank, num_outputs])]
 
     x_data = rng.uniform(-input_range, input_range,
