@@ -1,0 +1,245 @@
+---
+title: "Binary function transfer analyses"
+output: html_notebook
+---
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+
+```{r}
+input_shareds = c("False")#, "True")
+t1s = c("0", "1")
+t2s = c("0", "1", "None")
+lrs = c(1e-2)
+nhs = c(50)
+ims = c(0.33)
+num_runs = 500
+directory_format = "results_generalization_nonbinary_stb_nh_%i_lr_%.4f_im_%.2f/"
+
+d = replicate(num_runs * length(lrs) * length(nhs) * length(t1s) * length(t2s) * length(input_shareds),
+              data.frame())
+index = 1
+for (run in 0:(num_runs-1)) {
+  for (input_shared in input_shareds) {
+    for (num_hidden in nhs) {
+      for (lr in lrs) {
+        for (init_mult in ims) {
+          directory = sprintf(directory_format, num_hidden, lr, init_mult)
+          for (t1 in t1s) {
+            for (t2 in t2s) {
+            
+              filename = sprintf("%st1%s_t2%s_sharedinput%s_run%i.csv", directory, t1, t2, input_shared, run)
+              if (!file.exists(filename)) {
+                next
+              }
+              this_d = tryCatch(read.csv(filename, header=T),
+                                error = function(cond) {return(NA)})
+              if (length(this_d) == 1 && is.na(this_d)) {
+                next
+              }
+              this_d$num_hidden = num_hidden
+              this_d$lr = lr
+              this_d$init_size = init_mult
+              this_d$t2 = ifelse(t2 == "parity", "5-parity", t2)
+              this_d$run = run
+              this_d$t1 = ifelse(t1 == "parity", "5-parity", t1)
+              this_d$input_shared = input_shared
+              d[[index]] = this_d
+              index = index + 1
+            }
+          } 
+        }
+      }
+    }
+  }
+}
+
+d = bind_rows(d)
+```
+
+```{r}
+intermediate_d =d %>% 
+  rename(loss1_train=loss1,
+         loss2_train=loss2) %>%
+  complete(epoch, nesting(num_hidden, init_size, lr, t1, t2, input_shared, run)) %>%
+  gather(loss_name, loss_value, starts_with("loss")) %>%
+  separate(loss_name, c("task_domain", "train_or_test")) %>%
+  group_by(num_hidden, init_size, lr, t1, t2, input_shared, run, task_domain, train_or_test) %>%
+  mutate(loss_value = ifelse(is.na(loss_value), min(loss_value, na.rm=T), loss_value)) %>%
+  ungroup() %>%
+  spread(train_or_test, loss_value) %>%
+  group_by(num_hidden, init_size, lr, t1, t2, input_shared, run, task_domain) %>%
+  mutate(successful_learning_domain = any(train < 0.05)) %>%
+  ungroup() %>%
+  group_by(num_hidden, init_size, lr, t1, t2, input_shared, run, task_domain) %>%
+  mutate(successful_learning = all(successful_learning_domain)) %>%
+  ungroup() %>%
+  mutate(rescaled_epoch = ifelse(epoch < 20000, epoch, epoch-20000))
+  
+
+summarized_d = intermediate_d %>%
+  filter(successful_learning) %>%
+  group_by(lr, num_hidden, init_size, t1, t2, input_shared, epoch, task_domain) %>%
+  summarize(sd_train = sd(train),
+            median_train = median(train),
+            train = mean(train),
+            sd_test = sd(test),
+            median_test = median(test),
+            test = mean(test)) %>%
+  ungroup()
+
+partly_more_summarized_d = intermediate_d %>%
+  filter(successful_learning, task_domain == "loss1", train < 0.05) %>%
+  group_by(lr, num_hidden, init_size, t1, t2, input_shared, run) %>%
+  summarize(epoch_001 = head(epoch-20000, 1)) %>%
+  ungroup()
+
+more_summarized_d = partly_more_summarized_d %>%
+  group_by(lr, num_hidden, init_size, t1, t2, input_shared) %>%
+  summarize(median_epoch_001 = median(epoch_001))
+
+successful_generalization_d = intermediate_d %>%
+  filter(successful_learning, task_domain=="loss1", test < 0.05) %>%
+  group_by(lr, num_hidden, init_size, t1, t2, input_shared, run) %>%
+  summarize(epoch_005 = head(epoch, 1)) %>%
+  ungroup()
+  
+  
+```
+
+```{r}
+ggplot(successful_generalization_d, aes(x=t1, fill=t2)) +
+  geom_bar(stat="count",
+           position="dodge") +
+  scale_fill_brewer(palette="Dark2") 
+```
+
+```{r}
+ggplot(successful_generalization_d, aes(x=t1, y=log(epoch_005), color=t2)) +
+  geom_point(stat="summary",
+             fun.y="mean") +
+  scale_color_brewer(palette="Dark2")
+```
+
+
+```{r}
+ggplot(intermediate_d %>%
+         filter(task_domain == "loss1",
+                epoch >= 20000),
+       aes(x=rescaled_epoch, y=test, color=t2)) +
+  geom_line(stat="summary",
+            fun.y="mean") +
+  facet_wrap(~t1, scales="free")
+```
+
+# efficient analyses
+
+These are more efficient to compute with really large datasets.
+```{r}
+min_generalization_d_2 = d %>%
+  rename(loss1_train=loss1,
+         loss2_train=loss2) %>%
+  gather(loss_name, loss_value, starts_with("loss")) %>%
+  separate(loss_name, c("task_domain", "train_or_test")) %>%
+  spread(train_or_test, loss_value) %>%
+  group_by(lr, num_hidden, init_size, t1, t2, input_shared, run) %>%
+  mutate(successful_learning_source = any(task_domain=="loss2" & test < 0.05)) %>%
+  ungroup() %>%
+  filter(task_domain == "loss1") %>%
+  mutate(prior_task = case_when(t2 == "None" ~ "None",
+                                t2 == t1 ~ "Isomorphic",
+                                T ~ "Non-isomorphic")) %>%
+  group_by(lr, num_hidden, init_size, t1, t2, prior_task, input_shared, run, successful_learning_source) %>%
+  summarize(min_gen_target = min(test)) %>%
+  ungroup() 
+
+
+successful_generalization_d_2 = d %>%
+  rename(loss1_train=loss1,
+         loss2_train=loss2) %>%
+  gather(loss_name, loss_value, starts_with("loss")) %>%
+  separate(loss_name, c("task_domain", "train_or_test")) %>%
+  spread(train_or_test, loss_value) %>%
+  group_by(lr, num_hidden, init_size, t1, t2, input_shared, run, task_domain) %>%
+  top_n(1, wt=epoch) %>% 
+  ungroup() %>%
+  mutate(prior_task = case_when(t2 == "None" ~ "None",
+                                t2 == t1 ~ "Isomorphic",
+                                T ~ "Non-isomorphic")) %>%
+  group_by(lr, num_hidden, init_size, t1, t2, prior_task, input_shared, run) %>%
+  summarize(successful_learning_source = any(task_domain=="loss2" & test < 0.05),
+            successful_learning_target = any(task_domain=="loss1" & epoch >= 20000 & test < 0.05)) %>%
+  ungroup() 
+  
+stopping_d_2 = d %>%
+  rename(loss1_train=loss1,
+         loss2_train=loss2) %>%
+  gather(loss_name, loss_value, starts_with("loss")) %>%
+  separate(loss_name, c("task_domain", "train_or_test")) %>%
+  spread(train_or_test, loss_value) %>%
+  filter(test < 0.05) %>% # only take runs where something was successfully generalized
+  group_by(lr, num_hidden, init_size, t1, t2, input_shared, run, task_domain) %>%
+  top_n(1, wt=epoch) %>% 
+  ungroup() %>%
+  group_by(lr, num_hidden, init_size, t1, t2, input_shared, run) %>%
+  mutate(successful_learning_source = any(task_domain=="loss2")) %>%
+  ungroup() %>%
+  filter(task_domain == "loss1" & epoch > 20000) %>%
+  mutate(prior_task = case_when(t2 == "None" ~ "None",
+                                t2 == t1 ~ "Isomorphic",
+                                T ~ "Non-isomorphic")) %>%
+  group_by(lr, num_hidden, init_size, t1, t2, prior_task, input_shared, successful_learning_source, run) %>% 
+  summarize(epoch_005 = min(epoch))
+```
+
+```{r}
+theme_set(theme_bw())
+
+```
+
+```{r}
+ggplot(successful_generalization_d_2, aes(x=prior_task, y=1*successful_learning_target, fill=prior_task)) +
+  geom_bar(stat="summary",
+           fun.y="mean",
+           position="dodge") +
+  geom_errorbar(stat="summary",
+                fun.data="mean_cl_boot",
+                position=position_dodge(0.9),
+                width=0.25) +
+  scale_fill_brewer(palette="Dark2") +
+  facet_grid(init_size~successful_learning_source)
+```
+
+
+```{r}
+ggplot(min_generalization_d_2 %>%
+         filter(successful_learning_source), aes(x=prior_task, y=min_gen_target, fill=prior_task)) +
+  geom_bar(stat="summary",
+           fun.y="mean",
+           position="dodge") +
+  geom_errorbar(stat="summary",
+                fun.data="mean_cl_boot",
+                position=position_dodge(0.9),
+                width=0.25) +
+  scale_fill_brewer(palette="Dark2") +
+  labs(x="New task", y="Avg. optimal test error") +
+  guides(fill=guide_legend(title="Prior task"))
+#ggsave("plots/minimal_transfer_on_more_complex_tasks.png", width=6, height=4)
+```
+
+```{r}
+ggplot(stopping_d_2, aes(x=prior_task, y=epoch_005-40000, color=prior_task)) +
+  geom_point(stat="summary",
+           fun.y="mean",
+           position=position_dodge(0.9)) +
+  geom_errorbar(stat="summary",
+                fun.data="mean_cl_boot",
+                position=position_dodge(0.9),
+                width=0.25) +
+  scale_color_brewer(palette="Dark2") +
+  facet_grid(init_size ~ successful_learning_source)
+```
