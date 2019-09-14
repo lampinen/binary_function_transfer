@@ -11,20 +11,22 @@ PI = np.pi
 num_input = 50
 num_output = 50
 num_examples = 100
+ground_truth_bottleneck = 4
 num_hidden = 50
-num_runs = 100 
+num_runs = 500 
 num_test = 20 # how many datapoints to hold out for eval 
 learning_rate = 0.01
 num_epochs = 40000
 num_layers = 5
 init_mult = 0.33 
-output_dir = "results_generalization_nonbinary_stb_nh_%i_lr_%.4f_im_%.2f/" %(num_hidden, learning_rate, init_mult)
+output_dir = "results_generalization_nonbinary_stb_gtb_%i_nl_%i_nh_%i_lr_%.4f_im_%.2f/" %(ground_truth_bottleneck, num_layers, num_hidden, learning_rate, init_mult)
 save_every = 5
 train_sequentially = True # If true, train task 2 and then task 1
 second_train_both = True # If train_sequentially, whether to continue training on task 2 while training task 1
 batch_size = 20
 early_stopping_thresh = 5e-4
 ###
+ground_truth_hidden_layers = num_layers - 1
 if not os.path.exists(os.path.dirname(output_dir)):
     os.makedirs(os.path.dirname(output_dir))
 
@@ -42,7 +44,9 @@ for input_shared in [False]:#, True]:
                 filename_prefix = "t1%s_t2%s_sharedinput%s_run%i" %(str(t1), str(t2), str(input_shared), run_i)
                 print("Now running %s" % filename_prefix)
                 x1_data, y1_data = datasets.random_low_rank_function(
-                    num_input, num_output, num_examples, seed=2 * run_i + t1)
+                    num_input, num_output, num_examples, seed=2 * run_i + t1,
+                    num_hidden_layers=ground_truth_hidden_layers,
+                    rank=ground_truth_bottleneck)
 
                 num_datapoints = len(x1_data)
                 num_train = num_datapoints - num_test
@@ -56,7 +60,9 @@ for input_shared in [False]:#, True]:
                 if t2 != "None":
                     order2 = np.random.permutation(num_datapoints)
                     x2_data, y2_data = datasets.random_low_rank_function(
-                        num_input, num_output, num_examples, seed=2 * run_i + t2)
+                        num_input, num_output, num_examples, seed=2 * run_i + t2,
+                    num_hidden_layers=ground_truth_hidden_layers,
+                    rank=ground_truth_bottleneck)
                     x2_test_data = x2_data[order2[-num_test:]]
                     y2_test_data = y2_data[order2[-num_test:]]
                     x2_data = x2_data[order2[:num_train]]
