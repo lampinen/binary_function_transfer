@@ -10,12 +10,12 @@ PI = np.pi
 ### Parameters
 num_input = 50
 num_output = 50
-num_examples = 100
-ground_truth_bottleneck = 4
-num_hidden = 50
+num_examples = 200
+ground_truth_bottleneck = 5
+num_hidden = 100
 num_runs = 500 
-num_test = 20 # how many datapoints to hold out for eval 
-learning_rate = 0.01
+num_test = 40 # how many datapoints to hold out for eval 
+learning_rate = 0.0001
 num_epochs = 40000
 num_layers = 5
 init_mult = 0.33 
@@ -23,7 +23,7 @@ output_dir = "results_generalization_nonbinary_stb_gtb_%i_nl_%i_nh_%i_lr_%.4f_im
 save_every = 5
 train_sequentially = True # If true, train task 2 and then task 1
 second_train_both = True # If train_sequentially, whether to continue training on task 2 while training task 1
-batch_size = 20
+batch_size = 40
 early_stopping_thresh = 5e-4
 ###
 ground_truth_hidden_layers = num_layers - 1
