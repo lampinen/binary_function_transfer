@@ -11,15 +11,16 @@ PI = np.pi
 num_input = 50
 num_output = 50
 num_examples = 200
-ground_truth_bottleneck = 5
-num_hidden = 100
+ground_truth_bottleneck = 5 
+num_hidden = 50
 num_runs = 500 
 num_test = 40 # how many datapoints to hold out for eval 
-learning_rate = 0.0001
-num_epochs = 40000
+learning_rate = 0.001
+num_epochs = 10000
 num_layers = 5
 init_mult = 0.33 
-output_dir = "results_generalization_nonbinary_stb_gtb_%i_nl_%i_nh_%i_lr_%.4f_im_%.2f/" %(ground_truth_bottleneck, num_layers, num_hidden, learning_rate, init_mult)
+optimizer = "sgd"
+output_dir = "results_generalization_nonbinary_%s_stb_gtb_%i_nl_%i_nh_%i_lr_%.4f_im_%.2f/" %(optimizer, ground_truth_bottleneck, num_layers, num_hidden, learning_rate, init_mult)
 save_every = 5
 train_sequentially = True # If true, train task 2 and then task 1
 second_train_both = True # If train_sequentially, whether to continue training on task 2 while training task 1
@@ -99,8 +100,10 @@ for input_shared in [False]:#, True]:
                 second_domain_loss = tf.nn.l2_loss(output2 - target_ph) 
                 second_domain_loss = tf.reduce_mean(second_domain_loss)
                     
-                optimizer = tf.train.AdamOptimizer(learning_rate)
-#                optimizer = tf.train.GradientDescentOptimizer(learning_rate)
+                if optimizer == "Adam":
+                    optimizer = tf.train.AdamOptimizer(learning_rate)
+                elif optimizer == "sgd":
+                    optimizer = tf.train.GradientDescentOptimizer(learning_rate)
                 fd_train = optimizer.minimize(first_domain_loss)
                 sd_train = optimizer.minimize(second_domain_loss)
             
