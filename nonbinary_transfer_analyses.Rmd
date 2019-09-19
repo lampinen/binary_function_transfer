@@ -14,13 +14,14 @@ library(ggplot2)
 input_shareds = c("False")#, "True")
 t1s = c("0", "1")
 t2s = c("0", "1", "None")
-lrs = c(1e-4)
+lrs = c(1e-3)
 nls = c(5)
 nhs = c(50, 100)
 ims = c(0.33)
-gtbs = c(5, 10)
-num_runs = 500
-directory_format = "results_generalization_nonbinary_stb_gtb_%i_nl_%i_nh_%i_lr_%.4f_im_%.2f/"
+gtbs = c(5, 10, 15)
+optimizer = "Adam"
+num_runs = 200
+directory_format = "results_generalization_nonbinary_%s_stb_gtb_%i_nl_%i_nh_%i_lr_%.4f_im_%.2f/"
 
 d = replicate(num_runs * length(lrs) * length(nhs) * length(t1s) * length(t2s) * length(input_shareds),
               data.frame())
@@ -32,7 +33,7 @@ for (run in 0:(num_runs-1)) {
         for (num_hidden in nhs) {
           for (lr in lrs) {
             for (init_mult in ims) {
-              directory = sprintf(directory_format, ground_truth_bottleneck, num_layers, num_hidden, lr, init_mult)
+              directory = sprintf(directory_format, optimizer, ground_truth_bottleneck, num_layers, num_hidden, lr, init_mult)
               for (t1 in t1s) {
                 for (t2 in t2s) {
                   filename = sprintf("%st1%s_t2%s_sharedinput%s_run%i.csv", directory, t1, t2, input_shared, run)
@@ -69,7 +70,7 @@ d = bind_rows(d)
 ```
 
 ```{r}
-success_pct = 0.25  # what percent of the original test error you must reach to be considered a success
+success_pct = 0.1  # what percent of the original test error you must reach to be considered a success
 
 d_2 = d %>%
   rename(loss1_train=loss1,
@@ -158,22 +159,28 @@ min_generalization_d_2 = d_2 %>%
   filter(task_domain == "loss1") %>%
   mutate(prior_task = case_when(t2 == "None" ~ "None",
                                 t2 == t1 ~ "Isomorphic",
-                                T ~ "Non-isomorphic")) %>%
+                                T ~ "Nonisomorphic")) %>%
   group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, prior_task, input_shared, run, successful_learning_source) %>%
   summarize(min_gen_target = min(test)) %>%
   ungroup() 
 
-min_generalization_correlation_d_2 = d_2 %>%
+min_generalization_difference_d_2 = d_2 %>%
   mutate(prior_task = case_when(t2 == "None" ~ "None",
                                 t2 == t1 ~ "Isomorphic",
-                                T ~ "Non-isomorphic")) %>%
+                                T ~ "Nonisomorphic")) %>%
   group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, prior_task, input_shared, run, task_domain) %>%
   summarize(min_gen = min(test)) %>%
   ungroup() %>%
   spread(task_domain, min_gen) %>%
   rename(min_gen_target = loss1,
          min_gen_source = loss2) %>%
-  mutate(min_gen_source = ifelse(prior_task == "None", 0, min_gen_source))
+  mutate(min_gen_source = ifelse(prior_task == "None", 0, min_gen_source)) %>%
+  gather(measurement, value, starts_with("min_gen")) %>%
+  unite(prior_and_measurement, prior_task, measurement) %>%
+  select(-t2) %>%
+  spread(prior_and_measurement, value) %>%
+  mutate(iso_vs_noniso = Isomorphic_min_gen_target - Nonisomorphic_min_gen_target,
+         iso_vs_none = Isomorphic_min_gen_target - None_min_gen_target)
 
 successful_generalization_d_2 = d_2 %>%
   group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, input_shared, run, task_domain) %>%
@@ -181,11 +188,11 @@ successful_generalization_d_2 = d_2 %>%
   ungroup() %>%
   mutate(prior_task = case_when(t2 == "None" ~ "None",
                                 t2 == t1 ~ "Isomorphic",
-                                T ~ "Non-isomorphic")) %>%
+                                T ~ "Nonisomorphic")) %>%
   group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, prior_task, input_shared, run) %>%
   summarize(successful_learning_source = any(task_domain=="loss2" & test < success_pct),
-            successful_learning_target = any(task_domain=="loss1" & epoch >= 40000 & test < success_pct)) %>%
-  ungroup() 
+            successful_learning_target = any(task_domain=="loss1" & epoch >= 10000 & test < success_pct)) %>%
+  ungroup()
   
 stopping_d_2 = d_2 %>%
   filter(test < success_pct) %>% # only take runs where something was successfully generalized
@@ -195,7 +202,7 @@ stopping_d_2 = d_2 %>%
   group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, input_shared, run) %>%
   mutate(successful_learning_source = any(task_domain=="loss2")) %>%
   ungroup() %>%
-  filter(task_domain == "loss1" & epoch > 40000) %>%
+  filter(task_domain == "loss1" & epoch > 10000) %>%
   mutate(prior_task = case_when(t2 == "None" ~ "None",
                                 t2 == t1 ~ "Isomorphic",
                                 T ~ "Non-isomorphic")) %>%
@@ -239,25 +246,38 @@ ggplot(min_generalization_d_2, aes(x=prior_task, y=min_gen_target, fill=prior_ta
 ```
 
 ```{r}
-ggplot(min_generalization_correlation_d_2, aes(x=min_gen_source, y=min_gen_target, color=prior_task)) +
-  geom_point(alpha=0.1) +
-  geom_point(data=min_generalization_correlation_d_2 %>% 
-               filter(prior_task=="None"),
-             aes=aes(x=0),
-             stat="summary",
-             fun.y="mean",
-             size=5) +
-  geom_smooth(method="lm") +
-  scale_fill_brewer(palette="Dark2") +
-  labs(x="Prior task optimal test error", y="Target task optimal test error") +
-  guides(fill=guide_legend(title="Prior task")) +
-  ylim(0, NA) +
+ggplot(min_generalization_difference_d_2, aes(x=iso_vs_noniso)) +
+  geom_density() +
+  geom_vline(data=min_generalization_difference_d_2 %>%
+               group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, input_shared) %>%
+               summarize(iso_vs_noniso_mean = mean(iso_vs_noniso)) %>%
+               ungroup(),
+             mapping=aes(xintercept=iso_vs_noniso_mean),
+             stat = "summary",
+             fun.x = "mean") +
+  geom_vline(xintercept=0,
+             color="red",
+             linetype=2) +
+  labs(x="", y="Density") +
   facet_wrap(num_hidden~ground_truth_bottleneck)
-#ggsave("plots/nonbinary_min_gen_correlation.png", width=6, height=4)
+#ggsave("plots/nonbinary_min_gen_difference.png", width=6, height=4)
+```
+
+
+```{r}
+ggplot(min_generalization_difference_d_2, aes(x=None_min_gen_target, y=iso_vs_noniso)) +
+  geom_point() +
+  geom_hline(yintercept=0,
+             color="red",
+             linetype=2) +
+  geom_smooth(method="lm") +
+  labs(x="", y="Density") +
+  facet_wrap(num_hidden~ground_truth_bottleneck)
+#ggsave("plots/nonbinary_min_gen_difference.png", width=6, height=4)
 ```
 
 ```{r}
-ggplot(stopping_d_2, aes(x=prior_task, y=epoch_success-40000, color=prior_task)) +
+ggplot(stopping_d_2, aes(x=prior_task, y=epoch_success-10000, color=prior_task)) +
   geom_point(stat="summary",
            fun.y="mean",
            position=position_dodge(0.9)) +
@@ -266,5 +286,5 @@ ggplot(stopping_d_2, aes(x=prior_task, y=epoch_success-40000, color=prior_task))
                 position=position_dodge(0.9),
                 width=0.25) +
   scale_color_brewer(palette="Dark2") +
-  facet_grid(lr ~ successful_learning_source)
+  facet_grid(ground_truth_bottleneck + num_hidden ~ successful_learning_source, scales="free")
 ```
