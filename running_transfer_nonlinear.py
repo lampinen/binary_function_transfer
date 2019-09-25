@@ -10,24 +10,25 @@ PI = np.pi
 ### Parameters
 num_input = 50
 num_output = 50
-num_examples = 400
-ground_truth_bottleneck = 5
+num_source_examples = 2200
+num_target_examples = 400
+ground_truth_bottleneck = 5 
 num_hidden = 50
 num_runs = 500 
-num_test = 40 # how many datapoints to hold out for eval 
-learning_rate = 0.001
+num_test = 200 # how many datapoints to hold out for eval 
+learning_rate = 1e-4
 num_epochs = 10000
 num_layers = 5
-init_mult = 0.33 
+ground_truth_hidden_layers = 6 #num_layers - 1
+init_mult = 0.033
 optimizer_name = "Adam"
-output_dir = "results_generalization_nonbinary_%s_stb_gtb_%i_nl_%i_nh_%i_lr_%.4f_im_%.2f/" %(optimizer_name, ground_truth_bottleneck, num_layers, num_hidden, learning_rate, init_mult)
+output_dir = "results_generalization_nonbinary_lessskew_%s_stb_gthl_%i_gtb_%i_nl_%i_nh_%i_lr_%.4f_im_%.2f/" %(optimizer_name, ground_truth_hidden_layers, ground_truth_bottleneck, num_layers, num_hidden, learning_rate, init_mult)
 save_every = 5
 train_sequentially = True # If true, train task 2 and then task 1
 second_train_both = True # If train_sequentially, whether to continue training on task 2 while training task 1
-batch_size = 40
-early_stopping_thresh = 5e-4
+batch_size = 200
+early_stopping_thresh = 1e-4
 ###
-ground_truth_hidden_layers = num_layers - 1
 if not os.path.exists(os.path.dirname(output_dir)):
     os.makedirs(os.path.dirname(output_dir))
 
@@ -45,29 +46,33 @@ for input_shared in [False]:#, True]:
                 filename_prefix = "t1%s_t2%s_sharedinput%s_run%i" %(str(t1), str(t2), str(input_shared), run_i)
                 print("Now running %s" % filename_prefix)
                 x1_data, y1_data = datasets.random_low_rank_function(
-                    num_input, num_output, num_examples, seed=2 * run_i + t1,
+                    num_input, num_output, num_target_examples, seed=2 * run_i + t1,
                     num_hidden_layers=ground_truth_hidden_layers,
                     rank=ground_truth_bottleneck)
 
-                num_datapoints = len(x1_data)
-                num_train = num_datapoints - num_test
+                num_datapoints_1 = len(x1_data)
+                num_train_1 = num_datapoints_1 - num_test
 
-                order1 = np.random.permutation(num_datapoints)
+                order1 = np.random.permutation(num_datapoints_1)
                 x1_test_data = x1_data[order1[-num_test:]]
                 y1_test_data = y1_data[order1[-num_test:]]
-                x1_data = x1_data[order1[:num_train]]
-                y1_data = y1_data[order1[:num_train]]
+                x1_data = x1_data[order1[:num_train_1]]
+                y1_data = y1_data[order1[:num_train_1]]
 
                 if t2 != "None":
-                    order2 = np.random.permutation(num_datapoints)
                     x2_data, y2_data = datasets.random_low_rank_function(
-                        num_input, num_output, num_examples, seed=2 * run_i + t2,
+                        num_input, num_output, num_source_examples, seed=2 * run_i + t2,
                     num_hidden_layers=ground_truth_hidden_layers,
                     rank=ground_truth_bottleneck)
+                    num_datapoints_2 = len(x2_data)
+                    num_train_2 = num_datapoints_2 - num_test
+                    order2 = np.random.permutation(num_datapoints_2)
                     x2_test_data = x2_data[order2[-num_test:]]
                     y2_test_data = y2_data[order2[-num_test:]]
-                    x2_data = x2_data[order2[:num_train]]
-                    y2_data = y2_data[order2[:num_train]]
+                    x2_data = x2_data[order2[:num_train_2]]
+                    y2_data = y2_data[order2[:num_train_2]]
+                else:
+                    num_train_2 = 1  # for a dummy division
 
                 input_1_ph = tf.placeholder(tf.float32, shape=[None, num_input])
                 input_2_ph = tf.placeholder(tf.float32, shape=[None, num_input])
@@ -114,22 +119,23 @@ for input_shared in [False]:#, True]:
 
                 with tf.Session(config=sess_config) as sess:
                     def train_epoch_1():
-                        this_order = np.random.permutation(num_train)
-                        for batch_i in range(num_train//batch_size):
+                        this_order = np.random.permutation(num_train_1)
+                        for batch_i in range(num_train_1//batch_size):
                             feed_dict = {input_1_ph: x1_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], 
                                              target_ph: y1_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :]} 
                             sess.run(fd_train, feed_dict=feed_dict)
 
                     def train_epoch_2():
-                        this_order = np.random.permutation(num_train)
-                        for batch_i in range(num_train//batch_size):
+                        this_order = np.random.permutation(num_train_2)
+                        for batch_i in range(num_train_2//batch_size):
                             feed_dict = {input_2_ph: x2_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], 
                                          target_ph: y2_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :]}
                             sess.run(sd_train, feed_dict=feed_dict)
 
                     def train_epoch():
-                        this_order = np.random.permutation(num_train)
-                        for batch_i in range(num_train//batch_size):
+                        this_order = np.random.permutation(num_train_1)
+                        this_order_2 = np.random.permutation(num_train_2)
+                        for batch_i in range(num_train_1//batch_size):  # note that we only replay a subset of domain 2
                             feed_dict = {input_1_ph: x1_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :], 
                                              target_ph: y1_data[this_order[batch_i*batch_size:(batch_i+1)*batch_size], :]} 
                             sess.run(fd_train, feed_dict=feed_dict)
@@ -141,10 +147,10 @@ for input_shared in [False]:#, True]:
                     def evaluate():
                         curr_loss1 = 0.
                         curr_loss2 = 0.
-                        for batch_i in range(num_train//batch_size):
+                        for batch_i in range(num_train_1//batch_size):
                             curr_loss1 += sess.run(first_domain_loss, feed_dict={input_1_ph: x1_data[batch_i*batch_size:(batch_i+1)*batch_size, :], target_ph: y1_data[batch_i*batch_size:(batch_i+1)*batch_size, :]})
                         if t2 != "None":
-                            for batch_i in range(num_train//batch_size):
+                            for batch_i in range(num_train_2//batch_size):
                                 curr_loss2 += sess.run(second_domain_loss, feed_dict={input_2_ph: x2_data[batch_i*batch_size:(batch_i+1)*batch_size, :], target_ph: y2_data[batch_i*batch_size:(batch_i+1)*batch_size, :]})
                         curr_test_loss1 = 0.
                         curr_test_loss2 = 0.
@@ -153,7 +159,7 @@ for input_shared in [False]:#, True]:
                         if t2 != "None":
                             for batch_i in range(num_test//batch_size):
                                 curr_test_loss2 += sess.run(second_domain_loss, feed_dict={input_2_ph: x2_test_data[batch_i*batch_size:(batch_i+1)*batch_size, :], target_ph: y2_test_data[batch_i*batch_size:(batch_i+1)*batch_size, :]})
-                        return curr_loss1/num_train, curr_test_loss1/num_test, curr_loss2/num_train, curr_test_loss2/num_test
+                        return curr_loss1/num_train_1, curr_test_loss1/num_test, curr_loss2/num_train_2, curr_test_loss2/num_test
                     
                     sess.run(tf.global_variables_initializer())
                         
