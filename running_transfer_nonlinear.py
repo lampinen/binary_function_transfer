@@ -13,7 +13,7 @@ num_output = 50
 num_source_examples = 4400
 num_target_examples = 800
 ground_truth_bottleneck = 5 
-num_prior_tasks = 1
+num_prior_tasks = 4
 num_hidden = 50
 num_runs = 500 
 num_test = 400 # how many datapoints to hold out for eval 
@@ -206,7 +206,7 @@ for input_shared in [False]:#, True]:
                     sess.run(tf.global_variables_initializer())
                         
                     with open("%s%s.csv" % (output_dir, filename_prefix), "w") as fout:
-                        fout.write("epoch, loss1, loss1_test, " + ", ".join(["loss2%i, loss2%i_test" for t2_i in range(num_prior_tasks)]) + "\n")
+                        fout.write("epoch, loss1, loss1_test, " + ", ".join(["loss2%i, loss2%i_test" % (t2_i, t2_i) for t2_i in range(num_prior_tasks)]) + "\n")
                         losses = evaluate()
                         format_string = "%i," + ", ".join(["%f, %f"] * (num_prior_tasks + 1)) + "\n"
                         this_result = format_string % tuple([0] + [l for l in losses])
