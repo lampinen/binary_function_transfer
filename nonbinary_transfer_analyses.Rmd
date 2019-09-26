@@ -14,50 +14,58 @@ library(ggplot2)
 input_shareds = c("False")#, "True")
 t1s = c("0", "1")
 t2s = c("0", "1", "None")
-lrs = c(1e-3)
-nls = c(5)
-nhs = c(50, 100)
-ims = c(0.33)
-gtbs = c(5, 10, 15)
+nt2s = c(1, 2, 3, 4)
+lrs = c(1e-4)
+nls = c(5) #, 7)
+nhs = c(50)
+ims = c(0.033) #, 0.1)
+gthls = c(2) #, 4, 6) 
+gtbs = c(5)
 optimizer = "Adam"
-num_runs = 200
-directory_format = "results_generalization_nonbinary_%s_stb_gtb_%i_nl_%i_nh_%i_lr_%.4f_im_%.2f/"
+num_runs = 500
+directory_format = "results_moretask_generalization_nonbinary_scales_%s_stb_nt2_%i_gthl_%i_gtb_%i_nse_4400_nte_800_nl_%i_nh_%i_lr_%.4f_im_%.2f/"
 
-d = replicate(num_runs * length(lrs) * length(nhs) * length(t1s) * length(t2s) * length(input_shareds),
+d = replicate(num_runs * length(lrs) * length(nhs) * length(t1s) * length(t2s) * length(input_shareds) * length(nt2s) * length(nls) * length(ims) * length(gthls) * length(gtbs),
               data.frame())
 index = 1
 for (run in 0:(num_runs-1)) {
   for (input_shared in input_shareds) {
     for (num_layers in nls) {
-      for (ground_truth_bottleneck in gtbs) {
-        for (num_hidden in nhs) {
-          for (lr in lrs) {
-            for (init_mult in ims) {
-              directory = sprintf(directory_format, optimizer, ground_truth_bottleneck, num_layers, num_hidden, lr, init_mult)
-              for (t1 in t1s) {
-                for (t2 in t2s) {
-                  filename = sprintf("%st1%s_t2%s_sharedinput%s_run%i.csv", directory, t1, t2, input_shared, run)
-                  if (!file.exists(filename)) {
-                    next
-                  }
-                  this_d = tryCatch(read.csv(filename, header=T),
-                                    error = function(cond) {return(NA)})
-                  if (length(this_d) == 1 && is.na(this_d)) {
-                    next
-                  }
-                  this_d$num_hidden = num_hidden
-                  this_d$num_layers = num_layers
-                  this_d$ground_truth_bottleneck = ground_truth_bottleneck
-                  this_d$lr = lr
-                  this_d$init_size = init_mult
-                  this_d$t2 = ifelse(t2 == "parity", "5-parity", t2)
-                  this_d$run = run
-                  this_d$t1 = ifelse(t1 == "parity", "5-parity", t1)
-                  this_d$input_shared = input_shared
-                  d[[index]] = this_d
-                  index = index + 1
+      for (ground_truth_hidden_layers in gthls) {
+        for (ground_truth_bottleneck in gtbs) {
+          for (num_prior_tasks in nt2s) {
+            for (num_hidden in nhs) {
+              for (lr in lrs) {
+                for (init_mult in ims) {
+                  directory = sprintf(directory_format, optimizer, num_prior_tasks, ground_truth_hidden_layers, ground_truth_bottleneck, num_layers, num_hidden, lr, init_mult)
+                  for (t1 in t1s) {
+                    for (t2 in t2s) {
+                      filename = sprintf("%st1%s_t2%s_sharedinput%s_run%i.csv", directory, t1, t2, input_shared, run)
+                      if (!file.exists(filename)) {
+                        next
+                      }
+                      this_d = tryCatch(read.csv(filename, header=T),
+                                        error = function(cond) {return(NA)})
+                      if (length(this_d) == 1 && is.na(this_d)) {
+                        next
+                      }
+                      this_d$num_prior_tasks = num_prior_tasks
+                      this_d$num_hidden = num_hidden
+                      this_d$num_layers = num_layers
+                      this_d$ground_truth_bottleneck = ground_truth_bottleneck
+                      this_d$ground_truth_hidden_layers = ground_truth_hidden_layers
+                      this_d$lr = lr
+                      this_d$init_size = init_mult
+                      this_d$t2 = ifelse(t2 == "parity", "5-parity", t2)
+                      this_d$run = run
+                      this_d$t1 = ifelse(t1 == "parity", "5-parity", t1)
+                      this_d$input_shared = input_shared
+                      d[[index]] = this_d
+                      index = index + 1
+                    }
+                  } 
                 }
-              } 
+              }
             }
           }
         }
@@ -70,14 +78,12 @@ d = bind_rows(d)
 ```
 
 ```{r}
-success_pct = 0.1  # what percent of the original test error you must reach to be considered a success
-
 d_2 = d %>%
-  rename(loss1_train=loss1,
-         loss2_train=loss2) %>%
+  rename(loss1_train=loss1) %>%
+  select(-starts_with("loss2")) %>%
   gather(loss_name, loss_value, starts_with("loss")) %>%
   separate(loss_name, c("task_domain", "train_or_test")) %>%
-  group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, input_shared, run, task_domain, train_or_test) %>%
+  group_by(lr, num_prior_tasks, ground_truth_hidden_layers, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, input_shared, run, task_domain, train_or_test) %>%
   mutate(loss_value = loss_value/head(loss_value, n=1)) %>% # normalize by first value
   ungroup() %>%
   spread(train_or_test, loss_value) 
@@ -152,15 +158,27 @@ ggplot(intermediate_d %>%
 
 These are more efficient to compute with really large datasets.
 ```{r}
+success_pct = 0.1  # what percent of the original test error you must reach to be considered a success
+
+training_succeeds = d_2 %>% 
+  group_by(lr, num_prior_tasks, ground_truth_hidden_layers, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, input_shared, run) %>% 
+  summarize(successful_learning_target = any(task_domain == "loss1" & train < 0.01)) %>% 
+  group_by(lr, num_prior_tasks, ground_truth_hidden_layers, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, input_shared) %>% 
+  summarize(pct_successful_learning_target = mean(successful_learning_target, na.rm=T)) %>% 
+  mutate(prior_task = case_when(t2 == "None" ~ "None",
+                                t2 == t1 ~ "Isomorphic",
+                                T ~ "Nonisomorphic")) %>%
+  arrange(pct_successful_learning_target)
+
 min_generalization_d_2 = d_2 %>%
-  group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, input_shared, run) %>%
+  group_by(lr, num_prior_tasks, ground_truth_hidden_layers, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, input_shared, run) %>%
   mutate(successful_learning_source = any(task_domain=="loss2" & test < success_pct)) %>%
   ungroup() %>%
   filter(task_domain == "loss1") %>%
   mutate(prior_task = case_when(t2 == "None" ~ "None",
                                 t2 == t1 ~ "Isomorphic",
                                 T ~ "Nonisomorphic")) %>%
-  group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, prior_task, input_shared, run, successful_learning_source) %>%
+  group_by(lr, num_prior_tasks, ground_truth_hidden_layers, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, prior_task, input_shared, run, successful_learning_source) %>%
   summarize(min_gen_target = min(test)) %>%
   ungroup() 
 
@@ -168,13 +186,13 @@ min_generalization_difference_d_2 = d_2 %>%
   mutate(prior_task = case_when(t2 == "None" ~ "None",
                                 t2 == t1 ~ "Isomorphic",
                                 T ~ "Nonisomorphic")) %>%
-  group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, prior_task, input_shared, run, task_domain) %>%
+  group_by(lr, num_prior_tasks, ground_truth_hidden_layers, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, prior_task, input_shared, run, task_domain) %>%
   summarize(min_gen = min(test)) %>%
   ungroup() %>%
   spread(task_domain, min_gen) %>%
-  rename(min_gen_target = loss1,
-         min_gen_source = loss2) %>%
-  mutate(min_gen_source = ifelse(prior_task == "None", 0, min_gen_source)) %>%
+  rename(min_gen_target = loss1) %>%
+         #min_gen_source = loss2) %>%
+  #mutate(min_gen_source = ifelse(prior_task == "None", 0, min_gen_source)) %>%
   gather(measurement, value, starts_with("min_gen")) %>%
   unite(prior_and_measurement, prior_task, measurement) %>%
   select(-t2) %>%
@@ -183,30 +201,30 @@ min_generalization_difference_d_2 = d_2 %>%
          iso_vs_none = Isomorphic_min_gen_target - None_min_gen_target)
 
 successful_generalization_d_2 = d_2 %>%
-  group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, input_shared, run, task_domain) %>%
+  group_by(lr, num_prior_tasks, ground_truth_hidden_layers, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, input_shared, run, task_domain) %>%
   top_n(1, wt=epoch) %>% 
   ungroup() %>%
   mutate(prior_task = case_when(t2 == "None" ~ "None",
                                 t2 == t1 ~ "Isomorphic",
                                 T ~ "Nonisomorphic")) %>%
-  group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, prior_task, input_shared, run) %>%
+  group_by(lr, num_prior_tasks, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, prior_task, input_shared, run) %>%
   summarize(successful_learning_source = any(task_domain=="loss2" & test < success_pct),
             successful_learning_target = any(task_domain=="loss1" & epoch >= 10000 & test < success_pct)) %>%
   ungroup()
   
 stopping_d_2 = d_2 %>%
-  filter(test < success_pct) %>% # only take runs where something was successfully generalized
-  group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, input_shared, run, task_domain) %>%
+#  filter(test < success_pct) %>% # only take runs where something was successfully generalized
+  group_by(lr, num_prior_tasks, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, input_shared, run, task_domain) %>%
   top_n(1, wt=epoch) %>% 
   ungroup() %>%
-  group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, input_shared, run) %>%
+  group_by(lr, num_prior_tasks, ground_truth_hidden_layers, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, input_shared, run) %>%
   mutate(successful_learning_source = any(task_domain=="loss2")) %>%
   ungroup() %>%
   filter(task_domain == "loss1" & epoch > 10000) %>%
   mutate(prior_task = case_when(t2 == "None" ~ "None",
                                 t2 == t1 ~ "Isomorphic",
                                 T ~ "Non-isomorphic")) %>%
-  group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, prior_task, input_shared, successful_learning_source, run) %>% 
+  group_by(lr, num_prior_tasks, ground_truth_hidden_layers, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, t2, prior_task, input_shared, successful_learning_source, run) %>% 
   summarize(epoch_success = min(epoch))
 ```
 
@@ -216,32 +234,33 @@ theme_set(theme_bw())
 ```
 
 ```{r}
-ggplot(successful_generalization_d_2, aes(x=prior_task, y=1*successful_learning_target, fill=prior_task)) +
+ggplot(training_succeeds, # %>% filter(prior_task != "None"),
+       aes(x=prior_task, y=pct_successful_learning_target, fill=prior_task)) +
   geom_bar(stat="summary",
-           fun.y="mean",
-           position="dodge") +
+             fun.y="mean") +
   geom_errorbar(stat="summary",
                 fun.data="mean_cl_boot",
-                position=position_dodge(0.9),
                 width=0.25) +
-  scale_fill_brewer(palette="Dark2") +
-  facet_grid(ground_truth_bottleneck + num_hidden ~successful_learning_source)
+  scale_color_brewer(palette="Dark2") +
+  labs(x="Prior task", y="% successful learning") +
+  guides(fill=guide_legend(title="Prior task")) +
+  facet_grid(num_layers + num_hidden ~ num_prior_tasks + ground_truth_hidden_layers + init_size)
 ```
 
 
 ```{r}
-ggplot(min_generalization_d_2, aes(x=prior_task, y=min_gen_target, fill=prior_task)) +
-  geom_bar(stat="summary",
-           fun.y="mean",
-           position="dodge") +
+ggplot(min_generalization_d_2, # %>% filter(prior_task != "None"),
+       aes(x=prior_task, y=min_gen_target, color=prior_task)) +
+  geom_point(stat="summary",
+           fun.y="mean") +
   geom_errorbar(stat="summary",
                 fun.data="mean_cl_boot",
                 position=position_dodge(0.9),
                 width=0.25) +
-  scale_fill_brewer(palette="Dark2") +
+  scale_color_brewer(palette="Dark2") +
   labs(x="Prior task", y="Avg. optimal test error") +
   guides(fill=guide_legend(title="Prior task")) +
-  facet_wrap(num_hidden ~ ground_truth_bottleneck)
+  facet_grid(num_layers + num_hidden  ~ num_prior_tasks + ground_truth_hidden_layers  + init_size)
 #ggsave("plots/transfer_nonbinary_tasks.png", width=6, height=4)
 ```
 
@@ -249,8 +268,8 @@ ggplot(min_generalization_d_2, aes(x=prior_task, y=min_gen_target, fill=prior_ta
 ggplot(min_generalization_difference_d_2, aes(x=iso_vs_noniso)) +
   geom_density() +
   geom_vline(data=min_generalization_difference_d_2 %>%
-               group_by(lr, ground_truth_bottleneck, num_layers, num_hidden, init_size, t1, input_shared) %>%
-               summarize(iso_vs_noniso_mean = mean(iso_vs_noniso)) %>%
+               group_by(lr, ground_truth_bottleneck, ground_truth_hidden_layers, num_layers, num_hidden, init_size, input_shared) %>%
+               summarize(iso_vs_noniso_mean = mean(iso_vs_noniso, na.rm=T)) %>%
                ungroup(),
              mapping=aes(xintercept=iso_vs_noniso_mean),
              stat = "summary",
@@ -259,7 +278,7 @@ ggplot(min_generalization_difference_d_2, aes(x=iso_vs_noniso)) +
              color="red",
              linetype=2) +
   labs(x="", y="Density") +
-  facet_wrap(num_hidden~ground_truth_bottleneck)
+  facet_grid(num_layers + num_hidden ~ num_prior_tasks + ground_truth_hidden_layers + init_size)
 #ggsave("plots/nonbinary_min_gen_difference.png", width=6, height=4)
 ```
 
@@ -271,9 +290,39 @@ ggplot(min_generalization_difference_d_2, aes(x=None_min_gen_target, y=iso_vs_no
              color="red",
              linetype=2) +
   geom_smooth(method="lm") +
-  labs(x="", y="Density") +
-  facet_wrap(num_hidden~ground_truth_bottleneck)
-#ggsave("plots/nonbinary_min_gen_difference.png", width=6, height=4)
+  labs(x="Generalization error (No prior task)", y="Iso gen - noniso gen") +
+  facet_grid(num_layers  + num_hidden~ num_prior_tasks + ground_truth_hidden_layers + init_size, scales="free")
+#ggsave("plots/nonbinary_min_gen_difference_iso_noniso.png", width=9, height=6)
+```
+
+```{r}
+ggplot(min_generalization_difference_d_2, aes(x=iso_vs_none)) +
+  geom_density() +
+  geom_vline(data=min_generalization_difference_d_2 %>%
+               group_by(lr, ground_truth_bottleneck, ground_truth_hidden_layers, num_layers, num_hidden, init_size, input_shared) %>%
+               summarize(iso_vs_none_mean = mean(iso_vs_none, na.rm=T)) %>%
+               ungroup(),
+             mapping=aes(xintercept=iso_vs_none_mean),
+             stat = "summary",
+             fun.x = "mean") +
+  geom_vline(xintercept=0,
+             color="red",
+             linetype=2) +
+  labs(x="Iso - None", y="Density") +
+  facet_grid(num_layers + num_hidden~ num_prior_tasks + ground_truth_hidden_layers  + init_size)
+#ggsave("plots/nonbinary_min_gen_difference_iso_noniso_simple.png", width=9, height=6)
+```
+
+```{r}
+ggplot(min_generalization_difference_d_2, aes(x=None_min_gen_target, y=iso_vs_none)) +
+  geom_point() +
+  geom_hline(yintercept=0,
+             color="red",
+             linetype=2) +
+  geom_smooth(method="lm") +
+  labs(x="Generalization error (no prior task)", y="Iso gen - None gen") +
+  facet_grid(num_layers+ num_hidden ~ num_prior_tasks + ground_truth_hidden_layers + init_size)
+#ggsave("plots/nonbinary_min_gen_difference_iso_none.png", width=9, height=6)
 ```
 
 ```{r}
@@ -286,5 +335,8 @@ ggplot(stopping_d_2, aes(x=prior_task, y=epoch_success-10000, color=prior_task))
                 position=position_dodge(0.9),
                 width=0.25) +
   scale_color_brewer(palette="Dark2") +
-  facet_grid(ground_truth_bottleneck + num_hidden ~ successful_learning_source, scales="free")
+  facet_grid(num_layers + num_hidden~ num_prior_tasks + ground_truth_hidden_layers  + init_size, scales="free")
+#ggsave("plots/nonbinary_stopping_times.png", width=6, height=4)
+
+
 ```
