@@ -10,23 +10,23 @@ PI = np.pi
 ### Parameters
 num_input = 50
 num_output = 50
-num_source_examples = 2200
-num_target_examples = 400
+num_source_examples = 4400
+num_target_examples = 800
 ground_truth_bottleneck = 5 
 num_hidden = 50
 num_runs = 500 
-num_test = 200 # how many datapoints to hold out for eval 
+num_test = 400 # how many datapoints to hold out for eval 
 learning_rate = 1e-4
 num_epochs = 10000
 num_layers = 5
 ground_truth_hidden_layers = 6 #num_layers - 1
 init_mult = 0.033
 optimizer_name = "Adam"
-output_dir = "results_generalization_nonbinary_lessskew_%s_stb_gthl_%i_gtb_%i_nl_%i_nh_%i_lr_%.4f_im_%.2f/" %(optimizer_name, ground_truth_hidden_layers, ground_truth_bottleneck, num_layers, num_hidden, learning_rate, init_mult)
+output_dir = "results_generalization_nonbinary_scales_%s_stb_gthl_%i_gtb_%i_nse_%i_nte_%i_nl_%i_nh_%i_lr_%.4f_im_%.2f/" %(optimizer_name, ground_truth_hidden_layers, ground_truth_bottleneck, num_source_examples, num_target_examples, num_layers, num_hidden, learning_rate, init_mult)
 save_every = 5
 train_sequentially = True # If true, train task 2 and then task 1
 second_train_both = True # If train_sequentially, whether to continue training on task 2 while training task 1
-batch_size = 200
+batch_size = 400
 early_stopping_thresh = 1e-4
 ###
 if not os.path.exists(os.path.dirname(output_dir)):

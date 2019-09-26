@@ -162,7 +162,7 @@ def MIX2_dataset(num_inputs):
     return np.array(x_data), np.array(y_data)
 
 def random_low_rank_function(num_inputs, num_outputs, num_examples, seed, num_hidden_layers=4,
-                             rank=4, input_range=1.):
+                             rank=4, input_range=1., internal_scale_fac=2.2):
     """Random real-valued vector function, constructed by a deep relu network with
     the given "rank" (i.e. hidden layer size), with inputs sampled uniformly
     from [-input_range, input_range]"""
@@ -171,7 +171,7 @@ def random_low_rank_function(num_inputs, num_outputs, num_examples, seed, num_hi
     scale = np.sqrt(2./(num_inputs + rank))
     weights = [scale * rng.normal(size=[num_inputs, rank])]
 
-    scale = np.sqrt(1./(rank))
+    scale = internal_scale_fac * np.sqrt(1./(rank))
     for i in range(num_hidden_layers - 1):
         weights += [scale * rng.normal(size=[rank, rank])] 
     
